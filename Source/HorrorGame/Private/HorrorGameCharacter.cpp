@@ -20,6 +20,7 @@
 #include "KeyActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "PCTerminalActor.h"
+#include "Components/SphereComponent.h"
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
@@ -52,7 +53,19 @@ AHorrorGameCharacter::AHorrorGameCharacter()
 
 	InventoryComponent = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
 
+    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+    InteractionSphere->SetupAttachment(RootComponent);
 
+    // Give it a conservative default radius; we'll set the final radius in BeginPlay so the editable value is used
+    InteractionSphere->InitSphereRadius(200.f);
+    InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+
+    // Ignore everything by default, then overlap typical dynamic/static so we get actors
+    InteractionSphere->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+    // Adjust channels as needed for your project. This is permissive; refine later.
+    InteractionSphere->SetCollisionResponseToChannel(ECC_WorldStatic, ECollisionResponse::ECR_Overlap);
+    InteractionSphere->SetCollisionResponseToChannel(ECC_WorldDynamic, ECollisionResponse::ECR_Overlap);
+    InteractionSphere->SetGenerateOverlapEvents(true);
 }
 
 void AHorrorGameCharacter::BeginPlay()
@@ -91,6 +104,19 @@ void AHorrorGameCharacter::BeginPlay()
     if (!Subsystem) return;
 
     Subsystem->AddMappingContext(IMC_Gameplay, 0);
+
+    if (InteractionSphere)
+    {
+        InteractionSphere->SetSphereRadius(InteractionScanRadius);
+    }
+
+    GetWorldTimerManager().SetTimer(
+        InteractionScanTimerHandle,
+        this,
+        &AHorrorGameCharacter::PerformInteractionScan,
+        InteractionScanRate,
+        true
+    );
 }
 
 void AHorrorGameCharacter::Tick(float DeltaTime)
@@ -100,89 +126,6 @@ void AHorrorGameCharacter::Tick(float DeltaTime)
 	// ---------- HUD: show generic interact HUD if any door shows arrow (long-range) ----------
 	bool bShouldShowWidget = false;
 
-	TArray<AActor*> FoundDoors;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADoorActor::StaticClass(), FoundDoors);
-
-	for (AActor* Actor : FoundDoors)
-	{
-		if (ADoorActor* Door = Cast<ADoorActor>(Actor))
-		{
-			// Arrow rule — long-range indicator
-			if (Door->CanShowInteraction(this))
-			{
-				bShouldShowWidget = true;
-				break;
-			}
-		}
-	}
-
-	// ---------- Full widget selection: choose the ONE door that gets the full widget (short-range) ----------
-	ADoorActor* BestFullDoor = nullptr;
-	float BestFullDist = TNumericLimits<float>::Max();
-
-	// find the closest door that satisfies the full-interaction rule
-	for (AActor* Actor : FoundDoors)
-	{
-		ADoorActor* Door = Cast<ADoorActor>(Actor);
-		if (!Door) continue;
-
-		if (!Door->CanShowFullInteraction(this)) continue;
-
-		UBoxComponent* Box = Door->GetActiveInteractionBox(this);
-		if (!Box) continue;
-
-		const float Dist = FVector::Dist(GetActorLocation(), Box->GetComponentLocation());
-		if (Dist < BestFullDist)
-		{
-			BestFullDist = Dist;
-			BestFullDoor = Door;
-		}
-	}
-
-	// Now set full widget visibility: only BestFullDoor gets true
-	for (AActor* Actor : FoundDoors)
-	{
-		ADoorActor* Door = Cast<ADoorActor>(Actor);
-		if (!Door) continue;
-
-		Door->SetFullWidgetVisible(Door == BestFullDoor, this);
-	}
-
-    // ---------- PC TERMINAL INTERACTION WIDGETS ----------
-
-    TArray<AActor*> FoundPCs;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APCTerminalActor::StaticClass(), FoundPCs);
-
-    APCTerminalActor* BestPC = nullptr;
-    float BestPCDist = TNumericLimits<float>::Max();
-
-    for (AActor* Actor : FoundPCs)
-    {
-        APCTerminalActor* PC = Cast<APCTerminalActor>(Actor);
-        if (!PC) continue;
-
-        if (!PC->CanShowFullInteraction(this))
-            continue;
-
-        const float Dist = FVector::Dist(
-            GetActorLocation(),
-            PC->GetInteractionLocation()
-        );
-
-        if (Dist < BestPCDist)
-        {
-            BestPCDist = Dist;
-            BestPC = PC;
-        }
-    }
-
-    for (AActor* Actor : FoundPCs)
-    {
-        APCTerminalActor* PC = Cast<APCTerminalActor>(Actor);
-        if (!PC) continue;
-
-        PC->SetFullWidgetVisible(PC == BestPC, this);
-    }
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -774,4 +717,35 @@ void AHorrorGameCharacter::EndPCInteraction(bool bSuccess /*=false*/)
     }
 
     CurrentPCTerminalTarget = nullptr;
+}
+
+void AHorrorGameCharacter::PerformInteractionScan()
+{
+    if (!InteractionSphere) return;
+
+    TArray<AActor*> OverlappingActors;
+    InteractionSphere->GetOverlappingActors(OverlappingActors);
+
+    AActor* BestActor = nullptr;
+    float BestDistSq = TNumericLimits<float>::Max();
+
+    FVector MyLocation = GetActorLocation();
+
+    for (AActor* Actor : OverlappingActors)
+    {
+        if (!Actor) continue;
+
+        if (Actor->IsA(ADoorActor::StaticClass()) || Actor->IsA(APCTerminalActor::StaticClass()))
+        {
+            float DistSq = FVector::DistSquared(MyLocation, Actor->GetActorLocation());
+
+            if (DistSq < BestDistSq)
+            {
+                BestDistSq = DistSq;
+                BestActor = Actor;
+            }
+        }
+    }
+
+    CurrentInteractable = BestActor;
 }

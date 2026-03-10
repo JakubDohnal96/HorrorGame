@@ -17,6 +17,7 @@ class UInventoryComponent;
 class UInventoryWidgetBase;
 class UInputMappingContext;
 class APCTerminalActor;
+class USphereComponent;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
 
@@ -170,4 +171,27 @@ public:
 	// Start/End unlock sequence helpers
 	void BeginDoorUnlockSequence(ADoorActor* Door);
 	void EndDoorUnlockSequence(bool bSuccess);
+
+protected:
+    /** Sphere used to detect nearby interactables (cheap overlap) */
+    UPROPERTY(VisibleAnywhere, Category = "Interaction")
+    class USphereComponent* InteractionSphere;
+
+    /** Scan radius in centimeters (editable) */
+    UPROPERTY(EditAnywhere, Category = "Interaction")
+    float InteractionScanRadius = 800.f;
+
+    /** How often (seconds) to re-scan nearby interactables (throttle). 0.12 = ~8.3 Hz */
+    UPROPERTY(EditAnywhere, Category = "Interaction")
+    float InteractionScanRate = 0.12f;
+
+	FTimerHandle InteractionScanTimerHandle;
+	void PerformInteractionScan();
+
+private:
+    /** Accumulator for throttling the scan in Tick */
+    float InteractionScanAccumulator = 0.f;
+
+    /** (Optional) currently selected interactable - you can use this in your UI logic */
+    TWeakObjectPtr<AActor> CurrentInteractable;
 };
