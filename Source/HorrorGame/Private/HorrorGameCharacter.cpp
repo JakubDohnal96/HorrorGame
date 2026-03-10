@@ -21,6 +21,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "PCTerminalActor.h"
 #include "Components/SphereComponent.h"
+#include <limits>
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
@@ -721,31 +722,76 @@ void AHorrorGameCharacter::EndPCInteraction(bool bSuccess /*=false*/)
 
 void AHorrorGameCharacter::PerformInteractionScan()
 {
-    if (!InteractionSphere) return;
+    if (!InteractionSphere)
+        return;
 
     TArray<AActor*> OverlappingActors;
     InteractionSphere->GetOverlappingActors(OverlappingActors);
 
-    AActor* BestActor = nullptr;
-    float BestDistSq = TNumericLimits<float>::Max();
+    ADoorActor* BestDoor = nullptr;
+    float BestDoorDist = TNumericLimits<float>::Max();
+
+    APCTerminalActor* BestPC = nullptr;
+    float BestPCDist = TNumericLimits<float>::Max();
 
     FVector MyLocation = GetActorLocation();
 
     for (AActor* Actor : OverlappingActors)
     {
-        if (!Actor) continue;
+        if (!Actor)
+            continue;
 
-        if (Actor->IsA(ADoorActor::StaticClass()) || Actor->IsA(APCTerminalActor::StaticClass()))
+        if (ADoorActor* Door = Cast<ADoorActor>(Actor))
         {
-            float DistSq = FVector::DistSquared(MyLocation, Actor->GetActorLocation());
-
-            if (DistSq < BestDistSq)
+            if (Door->CanShowFullInteraction(this))
             {
-                BestDistSq = DistSq;
-                BestActor = Actor;
+                UBoxComponent* Box = Door->GetActiveInteractionBox(this);
+
+                if (Box)
+                {
+                    float Dist = FVector::Dist(MyLocation, Box->GetComponentLocation());
+
+                    if (Dist < BestDoorDist)
+                    {
+                        BestDoorDist = Dist;
+                        BestDoor = Door;
+                    }
+                }
+            }
+        }
+        else if (APCTerminalActor* PC = Cast<APCTerminalActor>(Actor))
+        {
+            if (PC->CanShowFullInteraction(this))
+            {
+                float Dist = FVector::Dist(MyLocation, PC->GetInteractionLocation());
+
+                if (Dist < BestPCDist)
+                {
+                    BestPCDist = Dist;
+                    BestPC = PC;
+                }
             }
         }
     }
 
-    CurrentInteractable = BestActor;
+    // Update door widgets
+    for (AActor* Actor : OverlappingActors)
+    {
+        if (ADoorActor* Door = Cast<ADoorActor>(Actor))
+        {
+            Door->SetFullWidgetVisible(Door == BestDoor, this);
+        }
+        else if (APCTerminalActor* PC = Cast<APCTerminalActor>(Actor))
+        {
+            PC->SetFullWidgetVisible(PC == BestPC, this);
+        }
+    }
+
+    // store interactable
+    if (BestDoor)
+        CurrentInteractable = BestDoor;
+    else if (BestPC)
+        CurrentInteractable = BestPC;
+    else
+        CurrentInteractable = nullptr;
 }
