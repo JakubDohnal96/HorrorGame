@@ -2,7 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "InteractableActor.h"    // <- new base
 #include "PCTerminalActor.generated.h"
 
 class UStaticMeshComponent;
@@ -13,7 +13,7 @@ class UMaterialInstanceDynamic;
 class UCanvasRenderTarget2D;
 
 UCLASS()
-class HORRORGAME_API APCTerminalActor : public AActor
+class HORRORGAME_API APCTerminalActor : public AInteractableActor
 {
     GENERATED_BODY()
 
@@ -25,25 +25,17 @@ protected:
     virtual void Tick(float DeltaTime) override;
 
 public:
-    // Interaction query helpers (same style as DoorActor)
     float GetInteractionMaxDistance() const { return InteractionMaxDistance; }
     float GetInteractionUseDistance() const { return InteractionUseDistance; }
 
-    // Whether the arrow/indicator should show (long range)
-    bool CanShowInteraction(APawn* Player) const;
+    // Interactable API overrides
+    virtual bool CanShowInteraction(APawn* Player) const override;
+    virtual bool CanShowFullInteraction(APawn* Player) const override;
+    virtual void SetFullWidgetVisible(bool bVisible, APawn* Player) override;
+    virtual FVector GetInteractionLocation() const override;
 
-    // Whether the full interaction (button) can appear (short range)
-    bool CanShowFullInteraction(APawn* Player) const;
-
-    // Show or hide the full interaction widget (called by character selection logic)
-    void SetFullWidgetVisible(bool bVisible, const APawn* Player);
-
-    // Interaction camera
     UCameraComponent* GetInteractionCamera() const { return InteractionCamera; }
     void DeactivateInteractionCamera();
-
-    // For other systems: get the world location of the interaction box center
-    FVector GetInteractionLocation() const;
 
 protected:
     /* Components */
@@ -53,27 +45,10 @@ protected:
     UPROPERTY(VisibleAnywhere, Category="PC|Components")
     UStaticMeshComponent* MonitorMesh;
 
-    // Interaction area
-    UPROPERTY(VisibleAnywhere, Category="PC|Interaction")
-    UBoxComponent* InteractionBox;
-
-    // Arrow-only widget (long-range indicator)
-    UPROPERTY(VisibleAnywhere, Category="PC|Interaction")
-    UWidgetComponent* ArrowWidget;
-
-    // Full widget (button + label) — shown when in use distance
-    UPROPERTY(VisibleAnywhere, Category="PC|Interaction")
-    UWidgetComponent* InteractionWidget;
-
-    // Camera used when interacting with PC
-    UPROPERTY(VisibleAnywhere, Category="PC|Interaction")
-    UCameraComponent* InteractionCamera;
-
-    /* Render target / monitor material (from your previous code) */
+    /* Render target / monitor material */
     UPROPERTY(EditAnywhere, Category="PC|Monitor")
     UMaterialInterface* ScreenBaseMaterial;
 
-    // material index for monitor screen slot (set in blueprint)
     UPROPERTY(EditAnywhere, Category="PC|Monitor")
     int32 ScreenMaterialIndex = 0;
 
@@ -83,7 +58,6 @@ protected:
     UPROPERTY(Transient)
     UCanvasRenderTarget2D* CanvasRenderTarget;
 
-    // Terminal text / render target settings (you already have these)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PC|Monitor")
     FString TerminalText = TEXT("> booting...\n> system init...\n> ready.");
 
@@ -95,16 +69,13 @@ protected:
 
     /* Interaction settings */
     UPROPERTY(EditAnywhere, Category="PC|Interaction")
-    float InteractionMaxDistance = 300.f; // arrow range
+    float InteractionMaxDistance = 300.f;
 
     UPROPERTY(EditAnywhere, Category="PC|Interaction")
-    float InteractionUseDistance = 120.f; // use range (button appears)
+    float InteractionUseDistance = 120.f;
 
     /* Helpers */
-    void SetupRenderTarget(); // create and bind render target (reuse your existing implementation)
+    void SetupRenderTarget();
     UFUNCTION()
     void OnCanvasUpdate(UCanvas* Canvas, int32 Width, int32 Height);
-
-    
-
 };

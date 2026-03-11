@@ -21,6 +21,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "PCTerminalActor.h"
 #include "Components/SphereComponent.h"
+#include "Components/BoxComponent.h"
 #include <limits>
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
