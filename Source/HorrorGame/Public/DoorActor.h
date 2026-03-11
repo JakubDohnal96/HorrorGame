@@ -193,6 +193,9 @@ public:
 
     FTransform GetKeyInsertTransform() const;
 
+	UFUNCTION(BlueprintCallable, Category="Door|Appearance")
+	int32 GetCurrentSymbolIndex() const { return CurrentSymbolIndex; }
+
 private:
 
     bool IsMovingTowardsPlayer(const AActor* Player) const;

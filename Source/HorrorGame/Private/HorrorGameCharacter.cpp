@@ -723,76 +723,82 @@ void AHorrorGameCharacter::EndPCInteraction(bool bSuccess /*=false*/)
 
 void AHorrorGameCharacter::PerformInteractionScan()
 {
-    if (!InteractionSphere)
-        return;
+    if (!InteractionSphere || !GetWorld()) return;
 
     TArray<AActor*> OverlappingActors;
     InteractionSphere->GetOverlappingActors(OverlappingActors);
 
-    ADoorActor* BestDoor = nullptr;
-    float BestDoorDist = TNumericLimits<float>::Max();
+    // Choose the best "full" interactable (door or PC)
+    AActor* BestActor = nullptr;
+    float BestDistSq = TNumericLimits<float>::Max();
+    const FVector MyLoc = GetActorLocation();
 
-    APCTerminalActor* BestPC = nullptr;
-    float BestPCDist = TNumericLimits<float>::Max();
-
-    FVector MyLocation = GetActorLocation();
-
+    // 1) Update arrow visibility for all overlapping interactables and find best full widget candidate
     for (AActor* Actor : OverlappingActors)
     {
-        if (!Actor)
-            continue;
+        if (!Actor) continue;
 
-        if (ADoorActor* Door = Cast<ADoorActor>(Actor))
+        // operate via base class pointer if possible
+        if (AInteractableActor* IA = Cast<AInteractableActor>(Actor))
         {
-            if (Door->CanShowFullInteraction(this))
+            // let the actor update its arrow widget based on its own CanShow* logic
+            IA->UpdateArrowVisibility(this);
+
+            // If this actor supports the full interaction check, consider it for the "best" candidate
+            if (IA->CanShowFullInteraction(this))
             {
-                UBoxComponent* Box = Door->GetActiveInteractionBox(this);
-
-                if (Box)
+                // Prefer interaction location if the child defines it
+                const FVector Loc = IA->GetInteractionLocation();
+                const float DistSq = FVector::DistSquared(Loc, MyLoc);
+                if (DistSq < BestDistSq)
                 {
-                    float Dist = FVector::Dist(MyLocation, Box->GetComponentLocation());
-
-                    if (Dist < BestDoorDist)
-                    {
-                        BestDoorDist = Dist;
-                        BestDoor = Door;
-                    }
+                    BestDistSq = DistSq;
+                    BestActor = Actor;
                 }
             }
         }
-        else if (APCTerminalActor* PC = Cast<APCTerminalActor>(Actor))
+        else
         {
-            if (PC->CanShowFullInteraction(this))
+            // fallback: handle legacy doors/PCs that may not yet inherit AInteractableActor
+            if (ADoorActor* D = Cast<ADoorActor>(Actor))
             {
-                float Dist = FVector::Dist(MyLocation, PC->GetInteractionLocation());
-
-                if (Dist < BestPCDist)
+                D->UpdateArrowVisibility(this); // if you added this to DoorActor (see below), it'll work; otherwise skip
+                if (D->CanShowFullInteraction(this))
                 {
-                    BestPCDist = Dist;
-                    BestPC = PC;
+                    float DistSq = FVector::DistSquared(D->GetActorLocation(), MyLoc);
+                    if (DistSq < BestDistSq) { BestDistSq = DistSq; BestActor = Actor; }
+                }
+            }
+            else if (APCTerminalActor* P = Cast<APCTerminalActor>(Actor))
+            {
+                P->UpdateArrowVisibility(this);
+                if (P->CanShowFullInteraction(this))
+                {
+                    float DistSq = FVector::DistSquared(P->GetActorLocation(), MyLoc);
+                    if (DistSq < BestDistSq) { BestDistSq = DistSq; BestActor = Actor; }
                 }
             }
         }
     }
 
-    // Update door widgets
+    // 2) Set full widget visibility: best actor true; others false
     for (AActor* Actor : OverlappingActors)
     {
-        if (ADoorActor* Door = Cast<ADoorActor>(Actor))
+        if (!Actor) continue;
+
+        if (AInteractableActor* IA = Cast<AInteractableActor>(Actor))
         {
-            Door->SetFullWidgetVisible(Door == BestDoor, this);
+            IA->SetFullWidgetVisible(Actor == BestActor, this);
         }
-        else if (APCTerminalActor* PC = Cast<APCTerminalActor>(Actor))
+        else if (ADoorActor* D = Cast<ADoorActor>(Actor))
         {
-            PC->SetFullWidgetVisible(PC == BestPC, this);
+            D->SetFullWidgetVisible(Actor == BestActor, this);
+        }
+        else if (APCTerminalActor* P = Cast<APCTerminalActor>(Actor))
+        {
+            P->SetFullWidgetVisible(Actor == BestActor, this);
         }
     }
 
-    // store interactable
-    if (BestDoor)
-        CurrentInteractable = BestDoor;
-    else if (BestPC)
-        CurrentInteractable = BestPC;
-    else
-        CurrentInteractable = nullptr;
+    CurrentInteractable = BestActor;
 }

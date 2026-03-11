@@ -37,6 +37,8 @@ public:
     // Where the interaction camera should focus / where the interaction happens.
     virtual FVector GetInteractionLocation() const;
 
+    virtual void UpdateArrowVisibility(APawn* Player);
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

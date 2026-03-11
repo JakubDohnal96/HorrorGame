@@ -95,3 +95,13 @@ FVector AInteractableActor::GetInteractionLocation() const
     }
     return GetActorLocation();
 }
+
+void AInteractableActor::UpdateArrowVisibility(APawn* Player)
+{
+    // Default behavior: arrow visible when CanShowInteraction() and not CanShowFullInteraction()
+    const bool bArrow = CanShowInteraction(Player) && !CanShowFullInteraction(Player);
+    if (ArrowWidget)
+    {
+        ArrowWidget->SetVisibility(bArrow);
+    }
+}

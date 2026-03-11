@@ -461,3 +461,13 @@ void ADoorActor::DeactivateInteractionCameras()
     if (InteractionCamera_Front) InteractionCamera_Front->Deactivate();
     if (InteractionCamera_Back) InteractionCamera_Back->Deactivate();
 }
+
+FTransform ADoorActor::GetKeyInsertTransform() const
+{
+    if (KeyInsertPoint)
+    {
+        return KeyInsertPoint->GetComponentTransform();
+    }
+
+    return GetActorTransform();
+}

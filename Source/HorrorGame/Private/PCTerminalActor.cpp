@@ -92,7 +92,7 @@ void APCTerminalActor::Tick(float DeltaTime)
     FVector CameraLocation = PC->PlayerCameraManager->GetCameraLocation();
 
     if (ArrowWidget && ArrowWidget->IsVisible()) FInteractableUtils::FaceWidgetTowardsCamera(ArrowWidget, CameraLocation);
-    if (InteractionWidget && InteractionWidget->IsVisible()) FInteractableUtils::FaceWidgetTowardsCamera(InteractionWidget, CameraLocation);
+    if (FullInteractionWidget && FullInteractionWidget->IsVisible()) FInteractableUtils::FaceWidgetTowardsCamera(FullInteractionWidget, CameraLocation);
 }
 
 bool APCTerminalActor::CanShowInteraction(APawn* Player) const
@@ -122,9 +122,9 @@ bool APCTerminalActor::CanShowFullInteraction(APawn* Player) const
 
 void APCTerminalActor::SetFullWidgetVisible(bool bVisible, APawn* Player)
 {
-    if (InteractionWidget)
+    if (FullInteractionWidget)
     {
-        InteractionWidget->SetVisibility(bVisible);
+        FullInteractionWidget->SetVisibility(bVisible);
     }
 }
 
