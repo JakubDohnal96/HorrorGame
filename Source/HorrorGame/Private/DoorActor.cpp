@@ -456,10 +456,19 @@ UCameraComponent* ADoorActor::GetActiveInteractionCamera(const APawn* Player) co
     }
 }
 
+// ensure the function exists in DoorActor.cpp
 void ADoorActor::DeactivateInteractionCameras()
 {
+    // Deactivate door's side cameras (if present)
     if (InteractionCamera_Front) InteractionCamera_Front->Deactivate();
-    if (InteractionCamera_Back) InteractionCamera_Back->Deactivate();
+    if (InteractionCamera_Back)  InteractionCamera_Back->Deactivate();
+
+    // Also deactivate the base-class interaction camera (if the base created one)
+    // InteractionCamera is declared in AInteractableActor and is accessible here.
+    if (InteractionCamera)
+    {
+        InteractionCamera->Deactivate();
+    }
 }
 
 FTransform ADoorActor::GetKeyInsertTransform() const
@@ -471,3 +480,4 @@ FTransform ADoorActor::GetKeyInsertTransform() const
 
     return GetActorTransform();
 }
+

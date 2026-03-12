@@ -195,6 +195,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Door|Appearance")
 	int32 GetCurrentSymbolIndex() const { return CurrentSymbolIndex; }
+	
 
 private:
 

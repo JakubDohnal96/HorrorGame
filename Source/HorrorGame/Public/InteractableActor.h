@@ -39,6 +39,12 @@ public:
 
     virtual void UpdateArrowVisibility(APawn* Player);
 
+    // Optional interaction camera (actors that switch camera for interaction can attach/use this)
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interactable|Components")
+    class UCameraComponent* InteractionCamera;
+
+    virtual UCameraComponent* GetInteractionCamera(const APawn* Player) const;
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -51,13 +57,10 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interactable|Components")
     class UWidgetComponent* FullInteractionWidget;
 
-    // Optional interaction camera (actors that switch camera for interaction can attach/use this)
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interactable|Components")
-    class UCameraComponent* InteractionCamera;
-
     // Optional interaction box used to evaluate "closest" interactable location
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interactable|Components")
     UBoxComponent* InteractionBox;
+
 
 private:
     // Register/unregister with InteractableManager

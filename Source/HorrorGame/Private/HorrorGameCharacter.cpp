@@ -367,15 +367,21 @@ void AHorrorGameCharacter::BeginDoorUnlockSequence(ADoorActor* Door)
         PC->SetIgnoreLookInput(true);
     }
 
+    // Deactivate any interaction cameras on this door (ensures base camera and other cameras are off)
+    Door->DeactivateInteractionCameras();
+
+    // Pick the camera to use (front/back) and activate it
     UCameraComponent* UseCam = Door->GetActiveInteractionCamera(this);
     if (PC && UseCam)
     {
         UseCam->Activate(true);
 
+        // Ensure only the chosen camera is active (defensive: deactivate the base camera again)
+        if (Door->InteractionCamera) Door->InteractionCamera->Deactivate(); // optional: fine if left in base, but safe
+
         FViewTargetTransitionParams Params;
         Params.BlendTime = 0.15f;
         Params.BlendFunction = VTBlend_Cubic;
-
         PC->SetViewTarget(Door, Params);
     }
 

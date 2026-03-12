@@ -105,3 +105,8 @@ void AInteractableActor::UpdateArrowVisibility(APawn* Player)
         ArrowWidget->SetVisibility(bArrow);
     }
 }
+
+UCameraComponent* AInteractableActor::GetInteractionCamera(const APawn* Player) const
+{
+    return InteractionCamera;
+}
