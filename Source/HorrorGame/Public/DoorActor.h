@@ -202,4 +202,5 @@ private:
     bool IsMovingTowardsPlayer(const AActor* Player) const;
     bool IsInteractionBoxOnScreen(APawn* Player, UBoxComponent* Box) const;
     UWidgetComponent* GetActiveInteractionWidget(const APawn* Player) const;
+
 };
