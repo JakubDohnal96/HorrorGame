@@ -2,7 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "InteractableActor.h" // <- new base
+#include "InteractableActor.h"
 #include "PCTerminalActor.generated.h"
 
 class UStaticMeshComponent;
@@ -11,6 +11,7 @@ class UWidgetComponent;
 class UCameraComponent;
 class UMaterialInstanceDynamic;
 class UCanvasRenderTarget2D;
+class UInputAction; // Enhanced Input action forward-declare
 
 UCLASS()
 class HORRORGAME_API APCTerminalActor : public AInteractableActor
@@ -25,25 +26,26 @@ protected:
 	virtual void Tick(float DeltaTime) override;
 
 public:
+	// distances (kept from your original)
 	float GetInteractionMaxDistance() const { return InteractionMaxDistance; }
 	float GetInteractionUseDistance() const { return InteractionUseDistance; }
 
-	// Interactable API overrides
+	// Interactable API overrides (kept from original)
 	virtual bool CanShowInteraction(APawn* Player) const override;
 	virtual bool CanShowFullInteraction(APawn* Player) const override;
 	virtual void SetFullWidgetVisible(bool bVisible, APawn* Player) override;
 	virtual FVector GetInteractionLocation() const override;
 
-	UCameraComponent* GetInteractionCamera() const { return InteractionCamera; }
+	// Getter for interaction camera (no override because base doesn't declare)
+	FORCEINLINE UCameraComponent* GetInteractionCamera() const { return InteractionCamera; }
 	void DeactivateInteractionCamera();
 
-	// New: explicit way to start chat session (callable from Blueprints)
-	UFUNCTION(BlueprintCallable, Category="PC|Chat")
+	/** Explicitly start the chat session (BlueprintCallable). Call after camera transition. */
+	UFUNCTION(BlueprintCallable, Category = "PC|Chat")
 	void BeginChatSession();
 
-
 protected:
-	/* Components */
+	/* Components (kept as in your original/InteractableActor usage) */
 	UPROPERTY(VisibleAnywhere, Category="PC|Components")
 	USceneComponent* Root;
 
@@ -85,13 +87,22 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PC|Chat")
 	TArray<FString> GhostMessages;
 
-	/** Messages the player will 'send' (each press E consumes the next item). */
+	/** Messages the player will 'send' (each press E / action consumes the next item). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PC|Chat")
 	TArray<FString> PlayerMessages;
 
 	/** Delay (seconds) between player message and ghost reply. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PC|Chat")
-	float GhostReplyDelay = 1.0f;
+	float GhostReplyDelay = 4.0f;
+
+	/* Input config */
+	/** If using Enhanced Input, assign the UInputAction asset here (preferred). */
+	UPROPERTY(EditAnywhere, Category="PC|Input")
+	UInputAction* InteractInputAction = nullptr;
+
+	/** Fallback: legacy action name (if you don't use Enhanced Input) */
+	UPROPERTY(EditAnywhere, Category="PC|Input")
+	FName InteractActionName = FName(TEXT("Interact"));
 
 	/* Internal state */
 	/** Lines appended during chat (kept separate from base TerminalText). */
@@ -114,6 +125,12 @@ protected:
 	/** Timer handle for delayed ghost reply. */
 	FTimerHandle GhostReplyTimer;
 
+	/** Timer handle for delayed chat auto-start (prevents double-press). */
+	FTimerHandle DelayedChatStartTimer;
+
+	/** Cached player controller while waiting for delayed start. */
+	TWeakObjectPtr<APlayerController> PendingPlayerController;
+
 	/* Helpers */
 	void SetupRenderTarget();
 	UFUNCTION()
@@ -122,33 +139,21 @@ protected:
 	/** Append a new line to the chat (and mark canvas dirty). */
 	void AppendChatLine(const FString& NewLine);
 
-	/** Called when player presses the E key while terminal is open. */
+	/** Called when player presses the interact/send action while terminal is open. */
 	UFUNCTION()
 	void OnPlayerSendMessage();
 
-	/** Helper to start chat (called when full widget is first shown). */
+	/** Helper to start chat (called when full widget is first shown or from blueprint). */
 	void StartChatIfNeeded();
 
-	/** Enable/disable input binding for E while terminal is open. */
+	/** Enable/disable input binding for send-action while terminal is open. */
 	void BindInputForPlayer(APlayerController* PC);
 	void UnbindInputForPlayer(APlayerController* PC);
 
-	/** Helper to trigger ghost reply after delay (internal). */
-	void TriggerGhostReply();
-
 	/** Add ghost reply immediately (called from timer). */
+	UFUNCTION()
 	void AddGhostReplyNow();
 
-    /** Name of the action mapping used for "Interact" (bind this to E in Project Settings). */
-	UPROPERTY(EditAnywhere, Category="PC|Input")
-	FName InteractActionName = FName(TEXT("Interact"));
-
-	/** Timer handle for delayed chat start (prevents double-press). */
-	FTimerHandle DelayedChatStartTimer;
-
-	/** Cached player controller while waiting for delayed start. */
-	TWeakObjectPtr<APlayerController> PendingPlayerController;
-
-	// New helper: force canvas refresh (call when prompt toggles)
+	/** Force canvas refresh */
 	void ForceCanvasUpdate();
 };

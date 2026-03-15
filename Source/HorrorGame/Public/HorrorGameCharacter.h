@@ -164,6 +164,12 @@ protected:
 	void BeginPCInteraction(APCTerminalActor* PCActor);
 	void EndPCInteraction(bool bSuccess = false);
 
+	// delayed start of terminal chat (after camera blend)
+	UFUNCTION()
+	void StartTerminalChat();
+
+	FTimerHandle TerminalChatTimerHandle;
+
 public:
 	USkeletalMeshComponent* GetMesh1P() const { return Mesh1P; }
 	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }

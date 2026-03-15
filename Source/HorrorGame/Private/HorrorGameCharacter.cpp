@@ -647,19 +647,17 @@ void AHorrorGameCharacter::BeginPCInteraction(APCTerminalActor* PCActor)
 {
     if (!PCActor) return;
 
-    // Save target
     CurrentPCTerminalTarget = PCActor;
 
-    // Disable free-look while interacting
     APlayerController* PC = Cast<APlayerController>(GetController());
-    if (PC)
-    {
-        PC->SetIgnoreLookInput(true);
-    }
+    if (!PC) return;
 
-    // Activate PC's interaction camera & switch view
+    // Disable free-look while interacting
+    PC->SetIgnoreLookInput(true);
+
+    // Activate PC camera
     UCameraComponent* UseCam = PCActor->GetInteractionCamera();
-    if (UseCam && PC)
+    if (UseCam)
     {
         UseCam->Activate(true);
 
@@ -668,12 +666,25 @@ void AHorrorGameCharacter::BeginPCInteraction(APCTerminalActor* PCActor)
         Params.BlendFunction = VTBlend_Cubic;
 
         PC->SetViewTarget(PCActor, Params);
+
+        // -------- START CHAT AFTER CAMERA BLEND --------
+        GetWorldTimerManager().ClearTimer(TerminalChatTimerHandle);
+
+        GetWorldTimerManager().SetTimer(
+            TerminalChatTimerHandle,
+            this,
+            &AHorrorGameCharacter::StartTerminalChat,
+            Params.BlendTime + 0.05f,
+            false
+        );
     }
 
-    // Input mapping: remove gameplay and add PC-specific mapping context (IMC_PCInteraction)
-    if (PC && PC->GetLocalPlayer())
+    // Switch input mapping
+    if (PC->GetLocalPlayer())
     {
-        UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
+        UEnhancedInputLocalPlayerSubsystem* Subsystem =
+            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
+
         if (Subsystem)
         {
             Subsystem->RemoveMappingContext(IMC_Gameplay);
@@ -681,15 +692,11 @@ void AHorrorGameCharacter::BeginPCInteraction(APCTerminalActor* PCActor)
         }
     }
 
-    // Show mouse cursor & set UI mode if desired (for now we simply show/hide cursor)
-    if (PC)
-    {
-        PC->bShowMouseCursor = true;
-        FInputModeGameAndUI Mode;
-        PC->SetInputMode(Mode);
-    }
+    // Mouse cursor
+    PC->bShowMouseCursor = true;
 
-    // Optionally visually open an on-screen widget (we won't open inventory)
+    FInputModeGameAndUI Mode;
+    PC->SetInputMode(Mode);
 }
 
 void AHorrorGameCharacter::EndPCInteraction(bool bSuccess /*=false*/)
@@ -807,4 +814,12 @@ void AHorrorGameCharacter::PerformInteractionScan()
     }
 
     CurrentInteractable = BestActor;
+}
+
+void AHorrorGameCharacter::StartTerminalChat()
+{
+    if (CurrentPCTerminalTarget)
+    {
+        CurrentPCTerminalTarget->BeginChatSession();
+    }
 }
