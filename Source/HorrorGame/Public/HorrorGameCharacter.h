@@ -18,6 +18,7 @@ class UInventoryWidgetBase;
 class UInputMappingContext;
 class APCTerminalActor;
 class USphereComponent;
+class APickupItemActor;  // ← NEW forward declaration
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
 
@@ -138,18 +139,6 @@ protected:
 	// cancel handler
 	void CancelDoorUnlock();
 
-	UPROPERTY(EditAnywhere, Category="Keys")
-	UStaticMesh* KeyMesh_A;
-
-	UPROPERTY(EditAnywhere, Category="Keys")
-	UStaticMesh* KeyMesh_B;
-
-	UPROPERTY(EditAnywhere, Category="Keys")
-	UStaticMesh* KeyMesh_C;
-
-	UPROPERTY(EditAnywhere, Category="Keys")
-	UStaticMesh* KeyMesh_D;
-
 	// ===== PC Terminal =====
 	UPROPERTY(EditAnywhere, Category="Input") 
 	class UInputMappingContext* IMC_PCInteraction;
@@ -169,6 +158,31 @@ protected:
 	void StartTerminalChat();
 
 	FTimerHandle TerminalChatTimerHandle;
+
+	// ===== NEW: Pickup Item Interaction =====
+
+	/** Input mapping context active while inspecting a pickup item (E = pick up, Q = cancel). */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	class UInputMappingContext* IMC_InteractionItem;
+
+	/** Input action for confirming the pickup (mapped to E inside IMC_InteractionItem). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* PickupConfirmAction;
+
+	/** The pickup item we are currently inspecting (camera blended to it). */
+	UPROPERTY()
+	APickupItemActor* CurrentPickupItemTarget = nullptr;
+
+	/** Enter the "inspect item" mode: blend camera, switch IMC. */
+	void BeginItemInteraction(APickupItemActor* ItemActor);
+
+	/** Leave inspect mode. If bPickedUp is true the item was taken; otherwise just cancelled. */
+	void EndItemInteraction(bool bPickedUp = false);
+
+	/** Bound to PickupConfirmAction – adds the item to inventory and destroys the actor. */
+	void ConfirmPickupItem();
+
+	// ===== END NEW =====
 
 public:
 	USkeletalMeshComponent* GetMesh1P() const { return Mesh1P; }

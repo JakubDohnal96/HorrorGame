@@ -20,6 +20,7 @@
 #include "KeyActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "PCTerminalActor.h"
+#include "PickupItemActor.h"          // ← NEW
 #include "Components/SphereComponent.h"
 #include "Components/BoxComponent.h"
 #include <limits>
@@ -58,13 +59,10 @@ AHorrorGameCharacter::AHorrorGameCharacter()
     InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
     InteractionSphere->SetupAttachment(RootComponent);
 
-    // Give it a conservative default radius; we'll set the final radius in BeginPlay so the editable value is used
     InteractionSphere->InitSphereRadius(200.f);
     InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 
-    // Ignore everything by default, then overlap typical dynamic/static so we get actors
     InteractionSphere->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
-    // Adjust channels as needed for your project. This is permissive; refine later.
     InteractionSphere->SetCollisionResponseToChannel(ECC_WorldStatic, ECollisionResponse::ECR_Overlap);
     InteractionSphere->SetCollisionResponseToChannel(ECC_WorldDynamic, ECollisionResponse::ECR_Overlap);
     InteractionSphere->SetGenerateOverlapEvents(true);
@@ -73,22 +71,6 @@ AHorrorGameCharacter::AHorrorGameCharacter()
 void AHorrorGameCharacter::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Pre-populate with 4 keys (indices 0..3)
-    if (InventoryComponent)
-    {
-    InventoryComponent->AddItem(
-        FInventoryItem(FText::FromString("Key A"), 0, KeyMesh_A));
-
-    InventoryComponent->AddItem(
-        FInventoryItem(FText::FromString("Key B"), 1, KeyMesh_B));
-
-    InventoryComponent->AddItem(
-        FInventoryItem(FText::FromString("Key C"), 2, KeyMesh_C));
-
-    InventoryComponent->AddItem(
-        FInventoryItem(FText::FromString("Key D"), 3, KeyMesh_D));
-    }
 
     if (InventoryWidgetClass)
     {
@@ -125,9 +107,7 @@ void AHorrorGameCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// ---------- HUD: show generic interact HUD if any door shows arrow (long-range) ----------
 	bool bShouldShowWidget = false;
-
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -172,12 +152,18 @@ void AHorrorGameCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		{
 			EnhancedInput->BindAction(InventoryCancelAction, ETriggerEvent::Started, this, &AHorrorGameCharacter::CancelDoorUnlock);
 		}
+
+		// ===== NEW: Pickup confirm action =====
+		if (PickupConfirmAction)
+		{
+			EnhancedInput->BindAction(PickupConfirmAction, ETriggerEvent::Started, this, &AHorrorGameCharacter::ConfirmPickupItem);
+		}
+		// ===== END NEW =====
 	}
 	else
 	{
 		UE_LOG(LogTemplateCharacter, Error, TEXT("EnhancedInputComponent not found on %s"), *GetName());
 	}
-
 }
 
 void AHorrorGameCharacter::Move(const FInputActionValue& Value)
@@ -218,10 +204,8 @@ void AHorrorGameCharacter::Interact()
 
     if (BestPC)
     {
-        // Start PC interaction (camera, input mapping). If already interacting with this PC, end it.
         if (CurrentPCTerminalTarget == BestPC)
         {
-            // toggle off
             EndPCInteraction();
         }
         else
@@ -230,6 +214,43 @@ void AHorrorGameCharacter::Interact()
         }
         return;
     }
+
+    // ===== NEW: Pickup item check (before doors) =====
+    {
+        TArray<AActor*> FoundItems;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), APickupItemActor::StaticClass(), FoundItems);
+
+        APickupItemActor* BestItem = nullptr;
+        float BestItemDist = TNumericLimits<float>::Max();
+
+        for (AActor* Actor : FoundItems)
+        {
+            APickupItemActor* Item = Cast<APickupItemActor>(Actor);
+            if (!Item || !Item->CanShowFullInteraction(this)) continue;
+
+            const float Dist = FVector::Dist(GetActorLocation(), Item->GetInteractionLocation());
+            if (Dist < BestItemDist)
+            {
+                BestItemDist = Dist;
+                BestItem = Item;
+            }
+        }
+
+        if (BestItem)
+        {
+            if (CurrentPickupItemTarget == BestItem)
+            {
+                // Already inspecting this item → treat E as pick-up confirm
+                ConfirmPickupItem();
+            }
+            else
+            {
+                BeginItemInteraction(BestItem);
+            }
+            return;
+        }
+    }
+    // ===== END NEW =====
 
     // ---------- Door fallback (existing logic) ----------
     TArray<AActor*> FoundDoors;
@@ -271,7 +292,6 @@ void AHorrorGameCharacter::ToggleInventory()
         LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>();
     if (!Subsystem) return;
 
-    // Lazy create widget if needed
     if (!InventoryWidgetInstance && InventoryWidgetClass)
     {
         InventoryWidgetInstance = CreateWidget<UInventoryWidgetBase>(GetWorld(), InventoryWidgetClass);
@@ -284,10 +304,7 @@ void AHorrorGameCharacter::ToggleInventory()
 
     if (bInventoryOpen)
     {
-        // 🟥 OPEN INVENTORY
         InventoryWidgetInstance->AddToViewport();
-
-        // 🔑 THIS IS THE MISSING PART
         InventoryWidgetInstance->RefreshInventory(
             InventoryComponent->Items,
             InventoryComponent->GetSelectedIndex()
@@ -308,7 +325,6 @@ void AHorrorGameCharacter::ToggleInventory()
     }
     else
     {
-        // 🟩 CLOSE INVENTORY
         InventoryWidgetInstance->RemoveFromParent();
 
         InventoryComponent->OnInventoryChanged.RemoveDynamic(
@@ -363,21 +379,17 @@ void AHorrorGameCharacter::BeginDoorUnlockSequence(ADoorActor* Door)
     APlayerController* PC = Cast<APlayerController>(GetController());
     if (PC)
     {
-        // 🔒 IMPORTANT: stop controller from rotating camera
         PC->SetIgnoreLookInput(true);
     }
 
-    // Deactivate any interaction cameras on this door (ensures base camera and other cameras are off)
     Door->DeactivateInteractionCameras();
 
-    // Pick the camera to use (front/back) and activate it
     UCameraComponent* UseCam = Door->GetActiveInteractionCamera(this);
     if (PC && UseCam)
     {
         UseCam->Activate(true);
 
-        // Ensure only the chosen camera is active (defensive: deactivate the base camera again)
-        if (Door->InteractionCamera) Door->InteractionCamera->Deactivate(); // optional: fine if left in base, but safe
+        if (Door->InteractionCamera) Door->InteractionCamera->Deactivate();
 
         FViewTargetTransitionParams Params;
         Params.BlendTime = 0.15f;
@@ -388,11 +400,10 @@ void AHorrorGameCharacter::BeginDoorUnlockSequence(ADoorActor* Door)
 	if (Subsystem)
 	{
 		Subsystem->RemoveMappingContext(IMC_Gameplay);
-		Subsystem->RemoveMappingContext(IMC_InventoryUI);          // in case it was open
-		Subsystem->AddMappingContext(IMC_Interaction, 2);  // highest priority
+		Subsystem->RemoveMappingContext(IMC_InventoryUI);
+		Subsystem->AddMappingContext(IMC_Interaction, 2);
 	}
 
-	// Open inventory UI visually (NO ToggleInventory)
 	if (!bInventoryOpen)
 	{
 		bInventoryOpen = true;
@@ -417,20 +428,17 @@ void AHorrorGameCharacter::EndDoorUnlockSequence(bool bSuccess)
 {
     APlayerController* PC = Cast<APlayerController>(GetController());
 
-    // 🔁 Enhanced Input subsystem
     UEnhancedInputLocalPlayerSubsystem* Subsystem = nullptr;
     if (PC && PC->GetLocalPlayer())
     {
         Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
     }
 
-    // 1️⃣ Reset control rotation
     if (PC)
     {
         PC->SetControlRotation(GetActorRotation());
     }
 
-    // 2️⃣ Close inventory UI
     if (bInventoryOpen && InventoryWidgetInstance && InventoryComponent)
     {
         bInventoryOpen = false;
@@ -447,14 +455,12 @@ void AHorrorGameCharacter::EndDoorUnlockSequence(bool bSuccess)
         CurrentDoorUnlockTarget->DeactivateInteractionCameras();
     }
 
-    // 4️⃣ Restore gameplay input mapping
     if (Subsystem)
     {
         Subsystem->RemoveMappingContext(IMC_Interaction);
         Subsystem->AddMappingContext(IMC_Gameplay, 0);
     }
 
-    // 5️⃣ Blend camera back
     if (PC)
     {
         PC->SetViewTargetWithBlend(
@@ -520,68 +526,38 @@ void AHorrorGameCharacter::UseSelectedItem()
     FTransform TargetTransform =
         CurrentDoorUnlockTarget->GetKeyInsertTransform();
 
-
-
     if (!TargetTransform.Equals(FTransform::Identity, 0.0001f) == false)
     {
-
     }
 
-    const FVector PlayerWorldLocation = GetActorLocation(); // or GetController()->GetPawn()->GetActorLocation()
-
+    const FVector PlayerWorldLocation = GetActorLocation();
     const FVector PlayerLocal = TargetTransform.InverseTransformPosition(PlayerWorldLocation);
 
-    const float DistanceFromHole = 20.0f; // tweakable: how far from hole to spawn the key
-
+    const float DistanceFromHole = 20.0f;
     const float SideSign = (PlayerLocal.Y >= 0.f) ? +1.f : -1.f;
 
-    // --------------------------------------------------
-    // 🔧 STOP BEFORE KEYHOLE (SIDE-AWARE)
-    // --------------------------------------------------
+    const float StopBeforeHole = 3.0f;
 
-    const float StopBeforeHole = 3.0f; // centimeters
-
-    // Offset along local insertion axis, SAME SIDE as start
-    const FVector LocalEndOffset(
-        0.f,
-        SideSign * StopBeforeHole,
-        0.f
-    );
-
-    // Convert to world space
-    const FVector WorldEndOffset =
-        TargetTransform.TransformVector(LocalEndOffset);
-
-    // Apply to target
-    TargetTransform.SetLocation(
-        TargetTransform.GetLocation() + WorldEndOffset
-    );
+    const FVector LocalEndOffset(0.f, SideSign * StopBeforeHole, 0.f);
+    const FVector WorldEndOffset = TargetTransform.TransformVector(LocalEndOffset);
+    TargetTransform.SetLocation(TargetTransform.GetLocation() + WorldEndOffset);
 
     const FVector LocalOffset(0.f, SideSign * DistanceFromHole, 0.f);
-
     const FVector StartLocation = TargetTransform.TransformPosition(LocalOffset);
 
     FTransform StartTransform = TargetTransform;
     StartTransform.SetLocation(StartLocation);
 
-    // Door insert rotation (ground truth)
     const FQuat DoorInsertRotation = TargetTransform.GetRotation();
-
-    // 🔑 BASE correction: key mesh is modeled backwards
-    // This fixes "wrong end goes into keyhole"
-    const FQuat MeshCorrectionQuat(FVector::UpVector, PI); // 180° yaw
-
-    // Start with corrected base rotation
+    const FQuat MeshCorrectionQuat(FVector::UpVector, PI);
     FQuat FinalKeyRotation = MeshCorrectionQuat * DoorInsertRotation;
 
-    // 👤 Player-side flip (already correct logic)
     if (SideSign < 0.f)
     {
-        const FQuat SideFlipQuat(FVector::UpVector, PI); // another 180°
+        const FQuat SideFlipQuat(FVector::UpVector, PI);
         FinalKeyRotation = SideFlipQuat * FinalKeyRotation;
     }
 
-    // Apply ONLY to key transforms
     StartTransform.SetRotation(FinalKeyRotation);
     TargetTransform.SetRotation(FinalKeyRotation);
 
@@ -594,7 +570,6 @@ void AHorrorGameCharacter::UseSelectedItem()
         StartTransform,
         Params
     );
-    
 
     if (!Key)
     {
@@ -622,6 +597,14 @@ void AHorrorGameCharacter::UseSelectedItem()
 
 void AHorrorGameCharacter::CancelDoorUnlock()
 {
+    // ===== NEW: Pickup item interaction cancel =====
+    if (CurrentPickupItemTarget)
+    {
+        EndItemInteraction(false);
+        return;
+    }
+    // ===== END NEW =====
+
     // If currently interacting with a PC terminal, end that interaction first
     if (CurrentPCTerminalTarget)
     {
@@ -652,10 +635,8 @@ void AHorrorGameCharacter::BeginPCInteraction(APCTerminalActor* PCActor)
     APlayerController* PC = Cast<APlayerController>(GetController());
     if (!PC) return;
 
-    // Disable free-look while interacting
     PC->SetIgnoreLookInput(true);
 
-    // Activate PC camera
     UCameraComponent* UseCam = PCActor->GetInteractionCamera();
     if (UseCam)
     {
@@ -667,7 +648,6 @@ void AHorrorGameCharacter::BeginPCInteraction(APCTerminalActor* PCActor)
 
         PC->SetViewTarget(PCActor, Params);
 
-        // -------- START CHAT AFTER CAMERA BLEND --------
         GetWorldTimerManager().ClearTimer(TerminalChatTimerHandle);
 
         GetWorldTimerManager().SetTimer(
@@ -679,7 +659,6 @@ void AHorrorGameCharacter::BeginPCInteraction(APCTerminalActor* PCActor)
         );
     }
 
-    // Switch input mapping
     if (PC->GetLocalPlayer())
     {
         UEnhancedInputLocalPlayerSubsystem* Subsystem =
@@ -692,7 +671,6 @@ void AHorrorGameCharacter::BeginPCInteraction(APCTerminalActor* PCActor)
         }
     }
 
-    // Mouse cursor
     PC->bShowMouseCursor = true;
 
     FInputModeGameAndUI Mode;
@@ -703,19 +681,16 @@ void AHorrorGameCharacter::EndPCInteraction(bool bSuccess /*=false*/)
 {
     APlayerController* PC = Cast<APlayerController>(GetController());
 
-    // Deactivate the interaction camera on the PC actor
     if (CurrentPCTerminalTarget)
     {
         CurrentPCTerminalTarget->DeactivateInteractionCamera();
     }
 
-    // Restore view target to player
     if (PC)
     {
         PC->SetViewTargetWithBlend(this, 0.15f, EViewTargetBlendFunction::VTBlend_Cubic, 0.f, true);
         PC->SetIgnoreLookInput(false);
 
-        // Restore input mapping contexts
         if (PC->GetLocalPlayer())
         {
             UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
@@ -726,13 +701,132 @@ void AHorrorGameCharacter::EndPCInteraction(bool bSuccess /*=false*/)
             }
         }
 
-        // Hide mouse cursor
         PC->bShowMouseCursor = false;
         PC->SetInputMode(FInputModeGameOnly());
     }
 
     CurrentPCTerminalTarget = nullptr;
 }
+
+// ===================================================================
+// NEW: Pickup item interaction (inspect → pick up or cancel)
+// ===================================================================
+
+void AHorrorGameCharacter::BeginItemInteraction(APickupItemActor* ItemActor)
+{
+    if (!ItemActor) return;
+
+    CurrentPickupItemTarget = ItemActor;
+
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (!PC) return;
+
+    // Lock camera rotation
+    PC->SetIgnoreLookInput(true);
+
+    // Activate the item's interaction camera
+    UCameraComponent* UseCam = ItemActor->GetInteractionCamera(this);
+    if (UseCam)
+    {
+        UseCam->Activate(true);
+
+        FViewTargetTransitionParams Params;
+        Params.BlendTime = 0.15f;
+        Params.BlendFunction = VTBlend_Cubic;
+        PC->SetViewTarget(ItemActor, Params);
+    }
+
+    // Switch IMC: remove gameplay, add the item-interaction context
+    if (PC->GetLocalPlayer())
+    {
+        UEnhancedInputLocalPlayerSubsystem* Subsystem =
+            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
+        if (Subsystem)
+        {
+            Subsystem->RemoveMappingContext(IMC_Gameplay);
+            Subsystem->RemoveMappingContext(IMC_InventoryUI);  // just in case
+            Subsystem->AddMappingContext(IMC_InteractionItem, 2);
+        }
+    }
+
+    // No inventory, no cursor — just camera + two-button choice
+    PC->bShowMouseCursor = false;
+    PC->SetInputMode(FInputModeGameOnly());
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
+            FString::Printf(TEXT("Inspecting: %s  [E] Pick up  [Q] Cancel"),
+                *ItemActor->ItemDisplayName.ToString()));
+    }
+}
+
+void AHorrorGameCharacter::EndItemInteraction(bool bPickedUp)
+{
+    APlayerController* PC = Cast<APlayerController>(GetController());
+
+    // Deactivate the item camera
+    if (CurrentPickupItemTarget)
+    {
+        CurrentPickupItemTarget->DeactivateInteractionCamera();
+    }
+
+    // Blend camera back to player
+    if (PC)
+    {
+        PC->SetViewTargetWithBlend(
+            this,
+            0.15f,
+            EViewTargetBlendFunction::VTBlend_Cubic,
+            0.f,
+            true
+        );
+        PC->SetIgnoreLookInput(false);
+
+        // Restore gameplay IMC
+        if (PC->GetLocalPlayer())
+        {
+            UEnhancedInputLocalPlayerSubsystem* Subsystem =
+                ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
+            if (Subsystem)
+            {
+                Subsystem->RemoveMappingContext(IMC_InteractionItem);
+                Subsystem->AddMappingContext(IMC_Gameplay, 0);
+            }
+        }
+
+        PC->bShowMouseCursor = false;
+        PC->SetInputMode(FInputModeGameOnly());
+    }
+
+    // If picked up, add to inventory and destroy the world actor
+    if (bPickedUp && CurrentPickupItemTarget && InventoryComponent)
+    {
+        FInventoryItem NewItem = CurrentPickupItemTarget->MakeInventoryItem();
+        InventoryComponent->AddItem(NewItem);
+
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Green,
+                FString::Printf(TEXT("Picked up: %s"), *NewItem.DisplayName.ToString()));
+        }
+
+        CurrentPickupItemTarget->Destroy();
+    }
+
+    CurrentPickupItemTarget = nullptr;
+}
+
+void AHorrorGameCharacter::ConfirmPickupItem()
+{
+    if (!CurrentPickupItemTarget) return;
+
+    EndItemInteraction(true);  // true = picked up
+}
+
+// ===================================================================
+// END NEW
+// ===================================================================
 
 void AHorrorGameCharacter::PerformInteractionScan()
 {
@@ -741,26 +835,20 @@ void AHorrorGameCharacter::PerformInteractionScan()
     TArray<AActor*> OverlappingActors;
     InteractionSphere->GetOverlappingActors(OverlappingActors);
 
-    // Choose the best "full" interactable (door or PC)
     AActor* BestActor = nullptr;
     float BestDistSq = TNumericLimits<float>::Max();
     const FVector MyLoc = GetActorLocation();
 
-    // 1) Update arrow visibility for all overlapping interactables and find best full widget candidate
     for (AActor* Actor : OverlappingActors)
     {
         if (!Actor) continue;
 
-        // operate via base class pointer if possible
         if (AInteractableActor* IA = Cast<AInteractableActor>(Actor))
         {
-            // let the actor update its arrow widget based on its own CanShow* logic
             IA->UpdateArrowVisibility(this);
 
-            // If this actor supports the full interaction check, consider it for the "best" candidate
             if (IA->CanShowFullInteraction(this))
             {
-                // Prefer interaction location if the child defines it
                 const FVector Loc = IA->GetInteractionLocation();
                 const float DistSq = FVector::DistSquared(Loc, MyLoc);
                 if (DistSq < BestDistSq)
@@ -772,10 +860,10 @@ void AHorrorGameCharacter::PerformInteractionScan()
         }
         else
         {
-            // fallback: handle legacy doors/PCs that may not yet inherit AInteractableActor
+            // fallback for legacy actors not yet inheriting AInteractableActor
             if (ADoorActor* D = Cast<ADoorActor>(Actor))
             {
-                D->UpdateArrowVisibility(this); // if you added this to DoorActor (see below), it'll work; otherwise skip
+                D->UpdateArrowVisibility(this);
                 if (D->CanShowFullInteraction(this))
                 {
                     float DistSq = FVector::DistSquared(D->GetActorLocation(), MyLoc);
@@ -791,10 +879,12 @@ void AHorrorGameCharacter::PerformInteractionScan()
                     if (DistSq < BestDistSq) { BestDistSq = DistSq; BestActor = Actor; }
                 }
             }
+            // NOTE: APickupItemActor inherits AInteractableActor, so
+            // it is already caught by the first branch above.
         }
     }
 
-    // 2) Set full widget visibility: best actor true; others false
+    // Set full widget visibility
     for (AActor* Actor : OverlappingActors)
     {
         if (!Actor) continue;
