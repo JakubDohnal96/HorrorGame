@@ -37,7 +37,6 @@ public:
 	virtual FVector GetInteractionLocation() const override;
 
 	// Getter for interaction camera (no override because base doesn't declare)
-	FORCEINLINE UCameraComponent* GetInteractionCamera() const { return InteractionCamera; }
 	void DeactivateInteractionCamera();
 
 	/** Explicitly start the chat session (BlueprintCallable). Call after camera transition. */

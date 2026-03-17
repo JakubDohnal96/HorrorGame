@@ -335,6 +335,7 @@ bool ADoorActor::CanShowInteraction(APawn* Player) const
 {
     if (!Player) return false;
     if (bIsMoving) return false;
+    if (bBlockedByExternalLock) return false;
 
     UBoxComponent* Box = const_cast<ADoorActor*>(this)->GetActiveInteractionBox(Player);
     if (!Box) return false;
@@ -351,6 +352,7 @@ bool ADoorActor::CanShowFullInteraction(APawn* Player) const
 {
     if (!Player) return false;
     if (bIsMoving) return false;
+    if (bBlockedByExternalLock) return false;
 
     UBoxComponent* Box = const_cast<ADoorActor*>(this)->GetActiveInteractionBox(Player);
     if (!Box) return false;

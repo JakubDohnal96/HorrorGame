@@ -18,7 +18,8 @@ class UInventoryWidgetBase;
 class UInputMappingContext;
 class APCTerminalActor;
 class USphereComponent;
-class APickupItemActor;  // ← NEW forward declaration
+class APickupItemActor;
+class APadlockActor;  // ← NEW
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
 
@@ -57,8 +58,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=Input)
 	UInputAction* InteractAction;
 
-	/* ===== UI ===== */
-
 	/* ===== Interaction ===== */
 
 	UPROPERTY(EditAnywhere, Category="Interaction")
@@ -78,17 +77,14 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Inventory")
     UInventoryComponent* InventoryComponent;
 
-    // Inventory widget
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="UI")
     TSubclassOf<UUserWidget> InventoryWidgetClass;
 
 	UPROPERTY()
 	UInventoryWidgetBase* InventoryWidgetInstance;
 
-    // Inventory open flag
     bool bInventoryOpen = false;
 
-    // Input actions (if using Enhanced Input, add UInputAction* properties in header)
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
     UInputAction* InventoryToggleAction;
 
@@ -101,14 +97,12 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
     UInputAction* InventoryNavRightAction;
 
-	// Inventory UI control
 	UFUNCTION()
 	void ToggleInventory();
 
 	UFUNCTION()
 	void OnInventoryChanged();
 
-	// Inventory navigation
 	void OnNavUp();
 	void OnNavDown();
 	void OnNavLeft();
@@ -124,19 +118,16 @@ protected:
 	class UInputMappingContext* IMC_Interaction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
-	UInputAction* InventoryUseAction; // mapped to E inside IMC_UI
+	UInputAction* InventoryUseAction;
 
-	// Current door we are trying to unlock (set while inventory open for unlocking)
 	UPROPERTY()
 	class ADoorActor* CurrentDoorUnlockTarget = nullptr;
 
-	// Function to try using currently selected item
 	void UseSelectedItem();
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
 	UInputAction* InventoryCancelAction;
 
-	// cancel handler
 	void CancelDoorUnlock();
 
 	// ===== PC Terminal =====
@@ -149,59 +140,75 @@ protected:
 	UPROPERTY()
 	class APCTerminalActor* CurrentPCTerminalTarget = nullptr;
 
-	// Begin/End PC interaction
 	void BeginPCInteraction(APCTerminalActor* PCActor);
 	void EndPCInteraction(bool bSuccess = false);
 
-	// delayed start of terminal chat (after camera blend)
 	UFUNCTION()
 	void StartTerminalChat();
 
 	FTimerHandle TerminalChatTimerHandle;
 
-	// ===== NEW: Pickup Item Interaction =====
+	// ===== Pickup Item Interaction =====
 
-	/** Input mapping context active while inspecting a pickup item (E = pick up, Q = cancel). */
 	UPROPERTY(EditAnywhere, Category = "Input")
 	class UInputMappingContext* IMC_InteractionItem;
 
-	/** Input action for confirming the pickup (mapped to E inside IMC_InteractionItem). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
 	UInputAction* PickupConfirmAction;
 
-	/** The pickup item we are currently inspecting (camera blended to it). */
 	UPROPERTY()
 	APickupItemActor* CurrentPickupItemTarget = nullptr;
 
-	/** Enter the "inspect item" mode: blend camera, switch IMC. */
 	void BeginItemInteraction(APickupItemActor* ItemActor);
-
-	/** Leave inspect mode. If bPickedUp is true the item was taken; otherwise just cancelled. */
 	void EndItemInteraction(bool bPickedUp = false);
-
-	/** Bound to PickupConfirmAction – adds the item to inventory and destroys the actor. */
 	void ConfirmPickupItem();
+
+	// ===== NEW: Padlock Interaction =====
+
+	/** IMC active while manipulating the padlock (A/D switch dials, W/S rotate, Q cancel). */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	class UInputMappingContext* IMC_PadlockInteraction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* PadlockDialPrevAction;   // A
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* PadlockDialNextAction;   // D
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* PadlockRotateUpAction;   // W
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* PadlockRotateDownAction; // S
+
+	UPROPERTY()
+	APadlockActor* CurrentPadlockTarget = nullptr;
+
+	void BeginPadlockInteraction(APadlockActor* Padlock);
+	void OnPadlockDialPrev();
+	void OnPadlockDialNext();
+	void OnPadlockRotateUp();
+	void OnPadlockRotateDown();
+
+public:
+	/** Called by PadlockActor when unlock animation completes (or by Q cancel). */
+	void EndPadlockInteraction();
 
 	// ===== END NEW =====
 
-public:
 	USkeletalMeshComponent* GetMesh1P() const { return Mesh1P; }
 	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
 
-	// Start/End unlock sequence helpers
 	void BeginDoorUnlockSequence(ADoorActor* Door);
 	void EndDoorUnlockSequence(bool bSuccess);
 
 protected:
-    /** Sphere used to detect nearby interactables (cheap overlap) */
     UPROPERTY(VisibleAnywhere, Category = "Interaction")
     class USphereComponent* InteractionSphere;
 
-    /** Scan radius in centimeters (editable) */
     UPROPERTY(EditAnywhere, Category = "Interaction")
     float InteractionScanRadius = 800.f;
 
-    /** How often (seconds) to re-scan nearby interactables (throttle). 0.12 = ~8.3 Hz */
     UPROPERTY(EditAnywhere, Category = "Interaction")
     float InteractionScanRate = 0.12f;
 
@@ -209,9 +216,6 @@ protected:
 	void PerformInteractionScan();
 
 private:
-    /** Accumulator for throttling the scan in Tick */
     float InteractionScanAccumulator = 0.f;
-
-    /** (Optional) currently selected interactable - you can use this in your UI logic */
     TWeakObjectPtr<AActor> CurrentInteractable;
 };

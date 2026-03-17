@@ -195,6 +195,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Door|Appearance")
 	int32 GetCurrentSymbolIndex() const { return CurrentSymbolIndex; }
+
+    /* ===== External lock (padlock blocks this door) ===== */
+
+    /** Set to true by an external actor (e.g. PadlockActor) to prevent interaction. */
+    UPROPERTY(BlueprintReadWrite, Category = "Door")
+    bool bBlockedByExternalLock = false;
 	
 
 private:
