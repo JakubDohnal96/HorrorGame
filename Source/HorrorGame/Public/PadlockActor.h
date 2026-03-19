@@ -175,11 +175,37 @@ public:
     UPROPERTY(EditAnywhere, Category = "Padlock|Puzzle")
     float BaseDialOffset = 126.f;
 
+    /* ========== Dial highlight ========== */
+
+    /** Emissive strength when a dial is selected. 0 = off, 1+ = glow. */
+    UPROPERTY(EditAnywhere, Category = "Padlock|Highlight")
+    float HighlightEmissiveStrength = 1.5f;
+
+    /** Name of the scalar parameter in the dial material that controls emissive. */
+    UPROPERTY(EditAnywhere, Category = "Padlock|Highlight")
+    FName EmissiveParamName = FName(TEXT("EmissiveBoost"));
+
+    /** Update which dial is highlighted. Called when selection changes or interaction starts/ends. */
+    void UpdateDialHighlight(int32 ActiveIndex);
+
+    /** Clear highlight from all dials (called when leaving interaction). */
+    void ClearAllDialHighlights();
+
     /** Set by the character when interaction starts; cleared on end. */
     UPROPERTY()
     AHorrorGameCharacter* CallbackCharacter = nullptr;
 
+    /** Whether we're currently in interaction mode (highlights should be active). */
+    bool bInInteractionMode = false;
+
 private:
+    /* ========== Dial dynamic materials ========== */
+
+    UPROPERTY()
+    TArray<UMaterialInstanceDynamic*> DialDynMaterials;
+
+    void CreateDialDynamicMaterials();
+
     /* ========== Animation state ========== */
 
     EPadlockAnimPhase AnimPhase = EPadlockAnimPhase::None;

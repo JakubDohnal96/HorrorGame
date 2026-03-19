@@ -285,6 +285,10 @@ void AHorrorGameCharacter::BeginPadlockInteraction(APadlockActor* Padlock)
     PC->bShowMouseCursor = false;
     PC->SetInputMode(FInputModeGameOnly());
 
+    // Activate dial highlight
+    Padlock->bInInteractionMode = true;
+    Padlock->UpdateDialHighlight(Padlock->SelectedDialIndex);
+
     if (GEngine)
     {
         GEngine->AddOnScreenDebugMessage(-1, 4.0f, FColor::Cyan,
@@ -299,6 +303,8 @@ void AHorrorGameCharacter::EndPadlockInteraction()
     if (CurrentPadlockTarget)
     {
         CurrentPadlockTarget->DeactivateInteractionCamera();
+        CurrentPadlockTarget->bInInteractionMode = false;
+        CurrentPadlockTarget->ClearAllDialHighlights();
         CurrentPadlockTarget->CallbackCharacter = nullptr;
     }
 

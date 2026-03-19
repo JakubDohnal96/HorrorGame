@@ -11,6 +11,7 @@
 #include "GameFramework/PlayerController.h"
 #include "InteractableUtils.h"
 #include "Engine/Engine.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 APadlockActor::APadlockActor()
 {
@@ -186,6 +187,9 @@ void APadlockActor::BeginPlay()
         DialValues[i] = 0;
         ApplyDialRotation(i);
     }
+
+    // Create dynamic material instances for highlight support
+    CreateDialDynamicMaterials();
 }
 
 void APadlockActor::Tick(float DeltaTime)
@@ -382,6 +386,9 @@ void APadlockActor::SelectNextDial()
     if (bAnimating) return;
     SelectedDialIndex = (SelectedDialIndex + 1) % 4;
 
+    if (bInInteractionMode)
+        UpdateDialHighlight(SelectedDialIndex);
+
     if (GEngine)
     {
         GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow,
@@ -393,6 +400,9 @@ void APadlockActor::SelectPreviousDial()
 {
     if (bAnimating) return;
     SelectedDialIndex = (SelectedDialIndex - 1 + 4) % 4;
+
+    if (bInInteractionMode)
+        UpdateDialHighlight(SelectedDialIndex);
 
     if (GEngine)
     {
@@ -469,6 +479,48 @@ void APadlockActor::ApplyDialRotation(int32 Index)
     Dial->SetRelativeRotation(Rot);
 }
 
+/* ========== Dial highlight ========== */
+
+void APadlockActor::CreateDialDynamicMaterials()
+{
+    DialDynMaterials.SetNum(4);
+
+    for (int32 i = 0; i < 4; ++i)
+    {
+        UStaticMeshComponent* Dial = GetDialMesh(i);
+        if (!Dial) continue;
+
+        // Create dynamic instance from whatever material is on slot 0
+        UMaterialInstanceDynamic* DynMat = Dial->CreateDynamicMaterialInstance(0);
+        if (DynMat)
+        {
+            // Ensure emissive starts at 0
+            DynMat->SetScalarParameterValue(EmissiveParamName, 0.f);
+        }
+        DialDynMaterials[i] = DynMat;
+    }
+}
+
+void APadlockActor::UpdateDialHighlight(int32 ActiveIndex)
+{
+    for (int32 i = 0; i < 4; ++i)
+    {
+        if (!DialDynMaterials.IsValidIndex(i) || !DialDynMaterials[i]) continue;
+
+        const float Value = (i == ActiveIndex) ? HighlightEmissiveStrength : 0.f;
+        DialDynMaterials[i]->SetScalarParameterValue(EmissiveParamName, Value);
+    }
+}
+
+void APadlockActor::ClearAllDialHighlights()
+{
+    for (int32 i = 0; i < 4; ++i)
+    {
+        if (!DialDynMaterials.IsValidIndex(i) || !DialDynMaterials[i]) continue;
+        DialDynMaterials[i]->SetScalarParameterValue(EmissiveParamName, 0.f);
+    }
+}
+
 /* ========== Unlock animation ========== */
 
 void APadlockActor::StartUnlockAnimation(AHorrorGameCharacter* OwningCharacter)
@@ -510,6 +562,10 @@ void APadlockActor::FinishUnlockAnimation()
     // Hide arrow/full widgets permanently
     if (ArrowWidget) ArrowWidget->SetVisibility(false);
     if (FullInteractionWidget) FullInteractionWidget->SetVisibility(false);
+
+    // Clear dial highlights
+    bInInteractionMode = false;
+    ClearAllDialHighlights();
 
     // End the interaction on the character side
     if (CallbackCharacter)
