@@ -250,6 +250,15 @@ private:
     /** Called when puzzle is solved. */
     void OnPuzzleSolved();
 
+    /** Delayed end of interaction after solve (so player sees the assembled result). */
+    void OnSolveDelayFinished();
+
+    FTimerHandle SolveDelayTimerHandle;
+
+    /** How long (seconds) the camera stays on the assembled paper before exiting. */
+    UPROPERTY(EditAnywhere, Category = "Blackboard|Puzzle")
+    float SolveViewDelay = 2.5f;
+
     /** Reference to grid array by side. */
     int32* GetGrid(EBlackboardSide Side);
     const int32* GetGrid(EBlackboardSide Side) const;

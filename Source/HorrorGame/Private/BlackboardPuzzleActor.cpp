@@ -11,6 +11,7 @@
 #include "InteractableUtils.h"
 #include "Engine/Engine.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "TimerManager.h"
 
 ABlackboardPuzzleActor::ABlackboardPuzzleActor()
 {
@@ -139,8 +140,16 @@ void ABlackboardPuzzleActor::Tick(float DeltaTime)
         return;
     }
 
-    // --- Active puzzle: no world widgets needed
-    if (PuzzlePhase == EBBPuzzlePhase::Active || PuzzlePhase == EBBPuzzlePhase::WaitingForItem)
+    // --- Currently in inventory selection: no world widgets needed
+    if (PuzzlePhase == EBBPuzzlePhase::WaitingForItem)
+    {
+        if (ArrowWidget) ArrowWidget->SetVisibility(false);
+        if (FullInteractionWidget) FullInteractionWidget->SetVisibility(false);
+        return;
+    }
+
+    // --- Currently being interacted with (Active + character present): no widgets
+    if (PuzzlePhase == EBBPuzzlePhase::Active && CallbackCharacter)
     {
         if (ArrowWidget) ArrowWidget->SetVisibility(false);
         if (FullInteractionWidget) FullInteractionWidget->SetVisibility(false);
@@ -180,7 +189,7 @@ void ABlackboardPuzzleActor::Tick(float DeltaTime)
 bool ABlackboardPuzzleActor::CanShowInteraction(APawn* Player) const
 {
     if (!Player || !InteractionBox) return false;
-    if (bSolved || PuzzlePhase != EBBPuzzlePhase::Inactive) return false;
+    if (bSolved || PuzzlePhase == EBBPuzzlePhase::WaitingForItem) return false;
 
     const float Dist = FVector::Dist(Player->GetActorLocation(), InteractionBox->GetComponentLocation());
     return Dist <= InteractionMaxDistance;
@@ -189,22 +198,10 @@ bool ABlackboardPuzzleActor::CanShowInteraction(APawn* Player) const
 bool ABlackboardPuzzleActor::CanShowFullInteraction(APawn* Player) const
 {
     if (!Player || !InteractionBox) return false;
-    if (bSolved || PuzzlePhase != EBBPuzzlePhase::Inactive) return false;
+    if (bSolved || PuzzlePhase == EBBPuzzlePhase::WaitingForItem) return false;
 
     const float Dist = FVector::Dist(Player->GetActorLocation(), InteractionBox->GetComponentLocation());
-    if (Dist > InteractionUseDistance) return false;
-
-    APlayerController* PC = Cast<APlayerController>(Player->GetController());
-    if (!PC) return true;
-
-    FVector2D ScreenPos;
-    if (!PC->ProjectWorldLocationToScreen(InteractionBox->GetComponentLocation(), ScreenPos, true))
-        return false;
-
-    int32 SizeX = 0, SizeY = 0;
-    PC->GetViewportSize(SizeX, SizeY);
-    return ScreenPos.X >= 0 && ScreenPos.X <= SizeX
-        && ScreenPos.Y >= 0 && ScreenPos.Y <= SizeY;
+    return Dist <= InteractionUseDistance;
 }
 
 void ABlackboardPuzzleActor::SetFullWidgetVisible(bool bVisible, APawn* /*Player*/)
@@ -462,87 +459,86 @@ void ABlackboardPuzzleActor::Navigate(int32 DRow, int32 DCol)
         return;
     }
 
-    /* ----- BROWSING: navigate occupied slots, with side transitions ----- */
-    int32 Row = CurrentSlot / 3;
-    int32 Col = CurrentSlot % 3;
-    int32 NewRow = Row + DRow;
-    int32 NewCol = Col + DCol;
-
-    // --- Side transitions ---
-    // Left → Right (pressing D past col 2)
-    if (CurrentSide == EBlackboardSide::Left && NewCol > 2)
-    {
-        int32 Target = FindNearestOccupied(EBlackboardSide::Right, Row * 3 + 0);
-        if (Target >= 0)
-        {
-            CurrentSide = EBlackboardSide::Right;
-            CurrentSlot = Target;
-            UpdateHighlight();
-        }
-        return;
-    }
-    // Right → Left (pressing A past col 0)
-    if (CurrentSide == EBlackboardSide::Right && NewCol < 0)
-    {
-        int32 Target = FindNearestOccupied(EBlackboardSide::Left, Row * 3 + 2);
-        if (Target >= 0)
-        {
-            CurrentSide = EBlackboardSide::Left;
-            CurrentSlot = Target;
-            UpdateHighlight();
-        }
-        return;
-    }
-
-    // Clamp within grid
-    NewRow = FMath::Clamp(NewRow, 0, 2);
-    NewCol = FMath::Clamp(NewCol, 0, 2);
-
-    int32 TargetSlot = NewRow * 3 + NewCol;
-
+    /* ----- BROWSING: find nearest occupied piece in the requested direction ----- */
+    const int32 CurRow = CurrentSlot / 3;
+    const int32 CurCol = CurrentSlot % 3;
     const int32* Grid = GetGrid(CurrentSide);
 
-    // If target slot is occupied, go there directly
-    if (Grid[TargetSlot] >= 0)
+    // --- Side transitions (moving past grid edge horizontally) ---
+    bool bTrySideTransition = false;
+
+    if (DCol > 0 && CurrentSide == EBlackboardSide::Left)
     {
-        CurrentSlot = TargetSlot;
+        // First try to find something to the right on this same grid
+        // If nothing found, transition to right grid
+        bTrySideTransition = true;
+    }
+    else if (DCol < 0 && CurrentSide == EBlackboardSide::Right)
+    {
+        bTrySideTransition = true;
+    }
+
+    // Search all 9 slots for the nearest occupied one that is
+    // "in the direction" of (DRow, DCol) relative to current slot.
+    int32 BestSlot = -1;
+    int32 BestDist = INT_MAX;
+
+    for (int32 i = 0; i < 9; ++i)
+    {
+        if (i == CurrentSlot) continue;
+        if (Grid[i] < 0) continue; // empty
+
+        const int32 R = i / 3;
+        const int32 C = i % 3;
+        const int32 DR = R - CurRow;
+        const int32 DC = C - CurCol;
+
+        // Check that this slot is in the requested direction:
+        // If DRow != 0, the candidate must be further in that row direction.
+        // If DCol != 0, the candidate must be further in that col direction.
+        bool bValid = true;
+        if (DRow != 0 && (DRow > 0 ? DR <= 0 : DR >= 0)) bValid = false;
+        if (DCol != 0 && (DCol > 0 ? DC <= 0 : DC >= 0)) bValid = false;
+
+        if (!bValid) continue;
+
+        // Manhattan distance (prefer closer pieces)
+        const int32 Dist = FMath::Abs(DR) + FMath::Abs(DC);
+        if (Dist < BestDist)
+        {
+            BestDist = Dist;
+            BestSlot = i;
+        }
+    }
+
+    if (BestSlot >= 0)
+    {
+        CurrentSlot = BestSlot;
         UpdateHighlight();
         return;
     }
 
-    // If target slot is empty, search further in the same direction
-    int32 SearchRow = NewRow + DRow;
-    int32 SearchCol = NewCol + DCol;
-    while (SearchRow >= 0 && SearchRow <= 2 && SearchCol >= 0 && SearchCol <= 2)
+    // --- Nothing found on this grid → try side transition ---
+    if (DCol > 0) // moving right
     {
-        int32 SearchSlot = SearchRow * 3 + SearchCol;
-        if (Grid[SearchSlot] >= 0)
-        {
-            CurrentSlot = SearchSlot;
-            UpdateHighlight();
-            return;
-        }
-        SearchRow += DRow;
-        SearchCol += DCol;
-    }
-
-    // Couldn't find occupied slot in that direction — check side transition
-    if (CurrentSide == EBlackboardSide::Left && DCol > 0)
-    {
-        int32 Target = FindNearestOccupied(EBlackboardSide::Right, Row * 3 + 0);
+        int32 Target = FindNearestOccupied(
+            (CurrentSide == EBlackboardSide::Left) ? EBlackboardSide::Right : EBlackboardSide::Left,
+            CurRow * 3 + 0);
         if (Target >= 0)
         {
-            CurrentSide = EBlackboardSide::Right;
+            CurrentSide = (CurrentSide == EBlackboardSide::Left) ? EBlackboardSide::Right : EBlackboardSide::Left;
             CurrentSlot = Target;
             UpdateHighlight();
         }
     }
-    else if (CurrentSide == EBlackboardSide::Right && DCol < 0)
+    else if (DCol < 0) // moving left
     {
-        int32 Target = FindNearestOccupied(EBlackboardSide::Left, Row * 3 + 2);
+        int32 Target = FindNearestOccupied(
+            (CurrentSide == EBlackboardSide::Right) ? EBlackboardSide::Left : EBlackboardSide::Right,
+            CurRow * 3 + 2);
         if (Target >= 0)
         {
-            CurrentSide = EBlackboardSide::Left;
+            CurrentSide = (CurrentSide == EBlackboardSide::Right) ? EBlackboardSide::Left : EBlackboardSide::Right;
             CurrentSlot = Target;
             UpdateHighlight();
         }
@@ -591,12 +587,6 @@ void ABlackboardPuzzleActor::InteractPiece()
         // Visually hover
         PlacePieceMeshAtSlot(HeldPieceIndex, EBlackboardSide::Right, CurrentSlot, true);
         UpdateHighlight();
-
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow,
-                FString::Printf(TEXT("Picked up piece %d — move & place with [E], rotate [R]"), HeldPieceIndex));
-        }
         return;
     }
 
@@ -669,13 +659,6 @@ void ABlackboardPuzzleActor::RotateHeldPiece()
 
     // Update visual
     PlacePieceMeshAtSlot(HeldPieceIndex, EBlackboardSide::Right, CurrentSlot, true);
-
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Cyan,
-            FString::Printf(TEXT("Piece %d rotation: %d°"),
-                HeldPieceIndex, PieceRotations[HeldPieceIndex] * 90));
-    }
 }
 
 /* ================================================================
@@ -726,31 +709,45 @@ void ABlackboardPuzzleActor::OnPuzzleSolved()
     PuzzlePhase = EBBPuzzlePhase::Solved;
     ClearAllHighlights();
 
-    UE_LOG(LogTemp, Log, TEXT("BlackboardPuzzle: SOLVED!"));
-
-    // Show assembled mesh if provided
-    if (AssembledMesh && AssembledMeshComp)
+    // Hide individual pieces
+    for (UStaticMeshComponent* Comp : PieceMeshComps)
     {
-        AssembledMeshComp->SetStaticMesh(AssembledMesh);
-        AssembledMeshComp->SetVisibility(true);
-
-        // Hide individual pieces
-        for (UStaticMeshComponent* Comp : PieceMeshComps)
-        {
-            if (Comp) Comp->SetVisibility(false);
-        }
+        if (Comp) Comp->SetVisibility(false);
     }
-    // else pieces stay visible in their solved positions
+
+    // Show assembled mesh at the center of the right grid
+    if (AssembledMeshComp)
+    {
+        if (AssembledMesh)
+        {
+            AssembledMeshComp->SetStaticMesh(AssembledMesh);
+        }
+
+        AssembledMeshComp->SetMobility(EComponentMobility::Movable);
+        AssembledMeshComp->bHiddenInGame = false;
+
+        FVector CenterPos = GetSlotWorldPosition(EBlackboardSide::Right, 4, false);
+        AssembledMeshComp->SetWorldLocation(CenterPos);
+
+        FRotator GridRot = GetPieceWorldRotation(0);
+        FQuat FinalQ = GridRot.Quaternion() * PieceMeshBaseRotation.Quaternion();
+        AssembledMeshComp->SetWorldRotation(FinalQ.Rotator());
+
+        AssembledMeshComp->SetVisibility(true);
+    }
 
     if (ArrowWidget) ArrowWidget->SetVisibility(false);
     if (FullInteractionWidget) FullInteractionWidget->SetVisibility(false);
 
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("Puzzle solved!"));
-    }
+    // Delay before ending interaction so the player sees the result
+    GetWorld()->GetTimerManager().SetTimer(
+        SolveDelayTimerHandle, this,
+        &ABlackboardPuzzleActor::OnSolveDelayFinished,
+        SolveViewDelay, false);
+}
 
-    // End interaction on character side
+void ABlackboardPuzzleActor::OnSolveDelayFinished()
+{
     if (CallbackCharacter)
     {
         CallbackCharacter->EndBlackboardInteraction(true);

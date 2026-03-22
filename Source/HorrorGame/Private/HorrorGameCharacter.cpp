@@ -280,7 +280,13 @@ void AHorrorGameCharacter::BeginBlackboardInteraction(ABlackboardPuzzleActor* Bo
     if (!Board) return;
     CurrentBlackboardTarget = Board;
     Board->CallbackCharacter = this;
-    Board->PuzzlePhase = EBBPuzzlePhase::WaitingForItem;
+
+    const bool bAlreadyActivated = (Board->PuzzlePhase == EBBPuzzlePhase::Active);
+
+    if (!bAlreadyActivated)
+    {
+        Board->PuzzlePhase = EBBPuzzlePhase::WaitingForItem;
+    }
 
     APlayerController* PC = Cast<APlayerController>(GetController());
     if (!PC) return;
@@ -298,35 +304,48 @@ void AHorrorGameCharacter::BeginBlackboardInteraction(ABlackboardPuzzleActor* Bo
         PC->SetViewTarget(Board, Params);
     }
 
-    // Switch IMC to Interaction (inventory + use item)
-    if (PC->GetLocalPlayer())
+    if (bAlreadyActivated)
     {
-        UEnhancedInputLocalPlayerSubsystem* Sub =
-            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
-        if (Sub)
+        // Puzzle already has pieces on the board — go straight to puzzle IMC
+        if (PC->GetLocalPlayer())
         {
-            Sub->RemoveMappingContext(IMC_Gameplay);
-            Sub->RemoveMappingContext(IMC_InventoryUI);
-            Sub->AddMappingContext(IMC_Interaction, 2);
+            UEnhancedInputLocalPlayerSubsystem* Sub =
+                ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
+            if (Sub)
+            {
+                Sub->RemoveMappingContext(IMC_Gameplay);
+                Sub->RemoveMappingContext(IMC_InventoryUI);
+                Sub->AddMappingContext(IMC_BlackboardPuzzle, 2);
+            }
         }
-    }
 
-    // Open inventory so the player can select the torn papers
-    if (!bInventoryOpen)
+        Board->UpdateHighlight();
+    }
+    else
     {
-        bInventoryOpen = true;
-        if (InventoryWidgetInstance)
+        // First time — open inventory so the player can select the torn papers
+        if (PC->GetLocalPlayer())
         {
-            InventoryWidgetInstance->AddToViewport();
-            InventoryWidgetInstance->RefreshInventory(InventoryComponent->Items, InventoryComponent->GetSelectedIndex());
+            UEnhancedInputLocalPlayerSubsystem* Sub =
+                ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
+            if (Sub)
+            {
+                Sub->RemoveMappingContext(IMC_Gameplay);
+                Sub->RemoveMappingContext(IMC_InventoryUI);
+                Sub->AddMappingContext(IMC_Interaction, 2);
+            }
         }
-        InventoryComponent->OnInventoryChanged.AddDynamic(this, &AHorrorGameCharacter::OnInventoryChanged);
-    }
 
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 4.0f, FColor::Cyan,
-            TEXT("Blackboard: select the torn papers from your inventory"));
+        if (!bInventoryOpen)
+        {
+            bInventoryOpen = true;
+            if (InventoryWidgetInstance)
+            {
+                InventoryWidgetInstance->AddToViewport();
+                InventoryWidgetInstance->RefreshInventory(InventoryComponent->Items, InventoryComponent->GetSelectedIndex());
+            }
+            InventoryComponent->OnInventoryChanged.AddDynamic(this, &AHorrorGameCharacter::OnInventoryChanged);
+        }
     }
 }
 
@@ -352,8 +371,10 @@ void AHorrorGameCharacter::EndBlackboardInteraction(bool bSolved)
         CurrentBlackboardTarget->ClearAllHighlights();
         CurrentBlackboardTarget->CallbackCharacter = nullptr;
 
-        // If not solved, reset puzzle to inactive so the player can try again
-        if (!bSolved && CurrentBlackboardTarget->PuzzlePhase != EBBPuzzlePhase::Solved)
+        // If the player hasn't placed the torn papers yet, reset to Inactive
+        // so the blackboard can be interacted with again from scratch.
+        // If the puzzle is Active (pieces on board), keep it Active.
+        if (!bSolved && CurrentBlackboardTarget->PuzzlePhase == EBBPuzzlePhase::WaitingForItem)
         {
             CurrentBlackboardTarget->PuzzlePhase = EBBPuzzlePhase::Inactive;
         }
