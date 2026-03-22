@@ -21,7 +21,8 @@
 #include "Camera/PlayerCameraManager.h"
 #include "PCTerminalActor.h"
 #include "PickupItemActor.h"
-#include "PadlockActor.h"             // ← NEW
+#include "PadlockActor.h"
+#include "BlackboardPuzzleActor.h"       // ← NEW
 #include "Components/SphereComponent.h"
 #include "Components/BoxComponent.h"
 #include <limits>
@@ -128,11 +129,20 @@ void AHorrorGameCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 	if (InventoryCancelAction) EI->BindAction(InventoryCancelAction, ETriggerEvent::Started, this, &AHorrorGameCharacter::CancelDoorUnlock);
 	if (PickupConfirmAction)   EI->BindAction(PickupConfirmAction,   ETriggerEvent::Started, this, &AHorrorGameCharacter::ConfirmPickupItem);
 
-	// ===== NEW: Padlock dial actions =====
+	// ===== Padlock dial actions =====
 	if (PadlockDialPrevAction)   EI->BindAction(PadlockDialPrevAction,   ETriggerEvent::Started, this, &AHorrorGameCharacter::OnPadlockDialPrev);
 	if (PadlockDialNextAction)   EI->BindAction(PadlockDialNextAction,   ETriggerEvent::Started, this, &AHorrorGameCharacter::OnPadlockDialNext);
 	if (PadlockRotateUpAction)   EI->BindAction(PadlockRotateUpAction,   ETriggerEvent::Started, this, &AHorrorGameCharacter::OnPadlockRotateUp);
 	if (PadlockRotateDownAction) EI->BindAction(PadlockRotateDownAction, ETriggerEvent::Started, this, &AHorrorGameCharacter::OnPadlockRotateDown);
+
+	// ===== NEW: Blackboard puzzle actions =====
+	if (BBNavUpAction)     EI->BindAction(BBNavUpAction,     ETriggerEvent::Started, this, &AHorrorGameCharacter::OnBBNavUp);
+	if (BBNavDownAction)   EI->BindAction(BBNavDownAction,   ETriggerEvent::Started, this, &AHorrorGameCharacter::OnBBNavDown);
+	if (BBNavLeftAction)   EI->BindAction(BBNavLeftAction,   ETriggerEvent::Started, this, &AHorrorGameCharacter::OnBBNavLeft);
+	if (BBNavRightAction)  EI->BindAction(BBNavRightAction,  ETriggerEvent::Started, this, &AHorrorGameCharacter::OnBBNavRight);
+	if (BBInteractAction)  EI->BindAction(BBInteractAction,  ETriggerEvent::Started, this, &AHorrorGameCharacter::OnBBInteract);
+	if (BBRotateAction)    EI->BindAction(BBRotateAction,    ETriggerEvent::Started, this, &AHorrorGameCharacter::OnBBRotate);
+	if (BBCancelAction)    EI->BindAction(BBCancelAction,    ETriggerEvent::Started, this, &AHorrorGameCharacter::OnBBCancel);
 }
 
 void AHorrorGameCharacter::Move(const FInputActionValue& Value)
@@ -173,7 +183,7 @@ void AHorrorGameCharacter::Interact()
         }
     }
 
-    // ---------- 2. Padlock (NEW) ----------
+    // ---------- 2. Padlock ----------
     {
         TArray<AActor*> Found;
         UGameplayStatics::GetAllActorsOfClass(GetWorld(), APadlockActor::StaticClass(), Found);
@@ -194,7 +204,28 @@ void AHorrorGameCharacter::Interact()
         }
     }
 
-    // ---------- 3. Pickup item ----------
+    // ---------- 3. Blackboard Puzzle (NEW) ----------
+    {
+        TArray<AActor*> Found;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), ABlackboardPuzzleActor::StaticClass(), Found);
+
+        ABlackboardPuzzleActor* Best = nullptr;
+        float BestDist = TNumericLimits<float>::Max();
+        for (AActor* A : Found)
+        {
+            ABlackboardPuzzleActor* B = Cast<ABlackboardPuzzleActor>(A);
+            if (!B || !B->CanShowFullInteraction(this)) continue;
+            float D = FVector::Dist(GetActorLocation(), B->GetInteractionLocation());
+            if (D < BestDist) { BestDist = D; Best = B; }
+        }
+        if (Best)
+        {
+            BeginBlackboardInteraction(Best);
+            return;
+        }
+    }
+
+    // ---------- 4. Pickup item ----------
     {
         TArray<AActor*> Found;
         UGameplayStatics::GetAllActorsOfClass(GetWorld(), APickupItemActor::StaticClass(), Found);
@@ -216,7 +247,7 @@ void AHorrorGameCharacter::Interact()
         }
     }
 
-    // ---------- 4. Door ----------
+    // ---------- 5. Door ----------
     {
         TArray<AActor*> Found;
         UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADoorActor::StaticClass(), Found);
@@ -241,17 +272,15 @@ void AHorrorGameCharacter::Interact()
 }
 
 // ===================================================================
-// Padlock interaction
+// Blackboard Puzzle Interaction  (NEW)
 // ===================================================================
 
-void AHorrorGameCharacter::BeginPadlockInteraction(APadlockActor* Padlock)
+void AHorrorGameCharacter::BeginBlackboardInteraction(ABlackboardPuzzleActor* Board)
 {
-    if (!Padlock) return;
-
-    CurrentPadlockTarget = Padlock;
-
-    // Store character reference on padlock so it can call EndPadlockInteraction when animation finishes
-    Padlock->CallbackCharacter = this;
+    if (!Board) return;
+    CurrentBlackboardTarget = Board;
+    Board->CallbackCharacter = this;
+    Board->PuzzlePhase = EBBPuzzlePhase::WaitingForItem;
 
     APlayerController* PC = Cast<APlayerController>(GetController());
     if (!PC) return;
@@ -259,6 +288,201 @@ void AHorrorGameCharacter::BeginPadlockInteraction(APadlockActor* Padlock)
     PC->SetIgnoreLookInput(true);
 
     // Camera
+    UCameraComponent* UseCam = Board->GetInteractionCamera(this);
+    if (UseCam)
+    {
+        UseCam->Activate(true);
+        FViewTargetTransitionParams Params;
+        Params.BlendTime = 0.15f;
+        Params.BlendFunction = VTBlend_Cubic;
+        PC->SetViewTarget(Board, Params);
+    }
+
+    // Switch IMC to Interaction (inventory + use item)
+    if (PC->GetLocalPlayer())
+    {
+        UEnhancedInputLocalPlayerSubsystem* Sub =
+            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
+        if (Sub)
+        {
+            Sub->RemoveMappingContext(IMC_Gameplay);
+            Sub->RemoveMappingContext(IMC_InventoryUI);
+            Sub->AddMappingContext(IMC_Interaction, 2);
+        }
+    }
+
+    // Open inventory so the player can select the torn papers
+    if (!bInventoryOpen)
+    {
+        bInventoryOpen = true;
+        if (InventoryWidgetInstance)
+        {
+            InventoryWidgetInstance->AddToViewport();
+            InventoryWidgetInstance->RefreshInventory(InventoryComponent->Items, InventoryComponent->GetSelectedIndex());
+        }
+        InventoryComponent->OnInventoryChanged.AddDynamic(this, &AHorrorGameCharacter::OnInventoryChanged);
+    }
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 4.0f, FColor::Cyan,
+            TEXT("Blackboard: select the torn papers from your inventory"));
+    }
+}
+
+void AHorrorGameCharacter::EndBlackboardInteraction(bool bSolved)
+{
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    UEnhancedInputLocalPlayerSubsystem* Sub = nullptr;
+    if (PC && PC->GetLocalPlayer())
+        Sub = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
+
+    // Close inventory if open
+    if (bInventoryOpen && InventoryWidgetInstance && InventoryComponent)
+    {
+        bInventoryOpen = false;
+        InventoryWidgetInstance->RemoveFromParent();
+        InventoryComponent->OnInventoryChanged.RemoveDynamic(this, &AHorrorGameCharacter::OnInventoryChanged);
+    }
+
+    // Deactivate camera
+    if (CurrentBlackboardTarget)
+    {
+        CurrentBlackboardTarget->DeactivateInteractionCamera();
+        CurrentBlackboardTarget->ClearAllHighlights();
+        CurrentBlackboardTarget->CallbackCharacter = nullptr;
+
+        // If not solved, reset puzzle to inactive so the player can try again
+        if (!bSolved && CurrentBlackboardTarget->PuzzlePhase != EBBPuzzlePhase::Solved)
+        {
+            CurrentBlackboardTarget->PuzzlePhase = EBBPuzzlePhase::Inactive;
+        }
+    }
+
+    // Restore IMC
+    if (Sub)
+    {
+        Sub->RemoveMappingContext(IMC_Interaction);
+        Sub->RemoveMappingContext(IMC_BlackboardPuzzle);
+        Sub->AddMappingContext(IMC_Gameplay, 0);
+    }
+
+    // Restore camera
+    if (PC)
+    {
+        PC->SetViewTargetWithBlend(this, 0.15f, EViewTargetBlendFunction::VTBlend_Cubic, 0.f, true);
+        PC->SetIgnoreLookInput(false);
+        PC->bShowMouseCursor = false;
+        PC->SetInputMode(FInputModeGameOnly());
+    }
+
+    CurrentBlackboardTarget = nullptr;
+}
+
+void AHorrorGameCharacter::UseItemOnBlackboard()
+{
+    if (!CurrentBlackboardTarget || !InventoryComponent) return;
+
+    const int32 Sel = InventoryComponent->GetSelectedIndex();
+    if (!InventoryComponent->Items.IsValidIndex(Sel))
+    {
+        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("No item selected"));
+        return;
+    }
+
+    const FInventoryItem& Item = InventoryComponent->Items[Sel];
+
+    if (Item.KeyIndex != CurrentBlackboardTarget->RequiredItemIndex)
+    {
+        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Red, TEXT("Not the right item"));
+        return;
+    }
+
+    // Consume the item
+    InventoryComponent->RemoveItemAt(Sel);
+
+    // Close inventory
+    if (bInventoryOpen && InventoryWidgetInstance)
+    {
+        bInventoryOpen = false;
+        InventoryWidgetInstance->RemoveFromParent();
+        InventoryComponent->OnInventoryChanged.RemoveDynamic(this, &AHorrorGameCharacter::OnInventoryChanged);
+    }
+
+    // Switch IMC from Interaction (inventory) to BlackboardPuzzle (WASD/E/R/Q)
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (PC && PC->GetLocalPlayer())
+    {
+        UEnhancedInputLocalPlayerSubsystem* Sub =
+            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
+        if (Sub)
+        {
+            Sub->RemoveMappingContext(IMC_Interaction);
+            Sub->AddMappingContext(IMC_BlackboardPuzzle, 2);
+        }
+    }
+
+    // Activate the puzzle
+    CurrentBlackboardTarget->ActivatePuzzle();
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("Papers placed! Solve the puzzle."));
+    }
+}
+
+void AHorrorGameCharacter::OnBBNavUp()
+{
+    if (CurrentBlackboardTarget) CurrentBlackboardTarget->Navigate(-1, 0);
+}
+void AHorrorGameCharacter::OnBBNavDown()
+{
+    if (CurrentBlackboardTarget) CurrentBlackboardTarget->Navigate(+1, 0);
+}
+void AHorrorGameCharacter::OnBBNavLeft()
+{
+    if (CurrentBlackboardTarget) CurrentBlackboardTarget->Navigate(0, -1);
+}
+void AHorrorGameCharacter::OnBBNavRight()
+{
+    if (CurrentBlackboardTarget) CurrentBlackboardTarget->Navigate(0, +1);
+}
+void AHorrorGameCharacter::OnBBInteract()
+{
+    if (CurrentBlackboardTarget) CurrentBlackboardTarget->InteractPiece();
+}
+void AHorrorGameCharacter::OnBBRotate()
+{
+    if (CurrentBlackboardTarget) CurrentBlackboardTarget->RotateHeldPiece();
+}
+void AHorrorGameCharacter::OnBBCancel()
+{
+    if (!CurrentBlackboardTarget) return;
+
+    // If holding a piece, cancel returns it — don't exit
+    if (CurrentBlackboardTarget->CancelAction())
+        return;
+
+    // Not holding — exit the puzzle entirely
+    EndBlackboardInteraction(false);
+}
+
+// ===================================================================
+// Padlock interaction (unchanged)
+// ===================================================================
+
+void AHorrorGameCharacter::BeginPadlockInteraction(APadlockActor* Padlock)
+{
+    if (!Padlock) return;
+
+    CurrentPadlockTarget = Padlock;
+    Padlock->CallbackCharacter = this;
+
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (!PC) return;
+
+    PC->SetIgnoreLookInput(true);
+
     UCameraComponent* UseCam = Padlock->GetInteractionCamera(this);
     if (UseCam)
     {
@@ -269,7 +493,6 @@ void AHorrorGameCharacter::BeginPadlockInteraction(APadlockActor* Padlock)
         PC->SetViewTarget(Padlock, Params);
     }
 
-    // Switch IMC
     if (PC->GetLocalPlayer())
     {
         UEnhancedInputLocalPlayerSubsystem* Sub =
@@ -285,7 +508,6 @@ void AHorrorGameCharacter::BeginPadlockInteraction(APadlockActor* Padlock)
     PC->bShowMouseCursor = false;
     PC->SetInputMode(FInputModeGameOnly());
 
-    // Activate dial highlight
     Padlock->bInInteractionMode = true;
     Padlock->UpdateDialHighlight(Padlock->SelectedDialIndex);
 
@@ -483,6 +705,14 @@ void AHorrorGameCharacter::UseSelectedItem()
 {
     if (!bInventoryOpen) return;
     if (!InventoryComponent) { UE_LOG(LogTemplateCharacter, Warning, TEXT("UseSelectedItem: InventoryComponent missing")); return; }
+
+    // ===== NEW: Blackboard target takes priority =====
+    if (CurrentBlackboardTarget)
+    {
+        UseItemOnBlackboard();
+        return;
+    }
+
     if (!CurrentDoorUnlockTarget) { UE_LOG(LogTemplateCharacter, Log, TEXT("UseSelectedItem: no door target")); return; }
 
     const int32 Sel = InventoryComponent->GetSelectedIndex();
@@ -542,14 +772,27 @@ void AHorrorGameCharacter::UseSelectedItem()
 
 void AHorrorGameCharacter::CancelDoorUnlock()
 {
-    // ===== NEW: Padlock cancel =====
+    // ===== Padlock cancel =====
     if (CurrentPadlockTarget)
     {
-        // Only allow cancel if NOT in the middle of unlock animation
         if (!CurrentPadlockTarget->bAnimating)
         {
             EndPadlockInteraction();
         }
+        return;
+    }
+
+    // ===== NEW: Blackboard cancel =====
+    if (CurrentBlackboardTarget)
+    {
+        // If puzzle is active and holding a piece, cancel returns the piece
+        if (CurrentBlackboardTarget->PuzzlePhase == EBBPuzzlePhase::Active)
+        {
+            if (CurrentBlackboardTarget->CancelAction())
+                return; // piece returned, stay in puzzle
+        }
+        // Exit blackboard interaction
+        EndBlackboardInteraction(false);
         return;
     }
 

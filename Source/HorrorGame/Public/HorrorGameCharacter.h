@@ -19,7 +19,8 @@ class UInputMappingContext;
 class APCTerminalActor;
 class USphereComponent;
 class APickupItemActor;
-class APadlockActor;  // ← NEW
+class APadlockActor;
+class ABlackboardPuzzleActor;   // ← NEW
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
 
@@ -163,23 +164,22 @@ protected:
 	void EndItemInteraction(bool bPickedUp = false);
 	void ConfirmPickupItem();
 
-	// ===== NEW: Padlock Interaction =====
+	// ===== Padlock Interaction =====
 
-	/** IMC active while manipulating the padlock (A/D switch dials, W/S rotate, Q cancel). */
 	UPROPERTY(EditAnywhere, Category = "Input")
 	class UInputMappingContext* IMC_PadlockInteraction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	UInputAction* PadlockDialPrevAction;   // A
+	UInputAction* PadlockDialPrevAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	UInputAction* PadlockDialNextAction;   // D
+	UInputAction* PadlockDialNextAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	UInputAction* PadlockRotateUpAction;   // W
+	UInputAction* PadlockRotateUpAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	UInputAction* PadlockRotateDownAction; // S
+	UInputAction* PadlockRotateDownAction;
 
 	UPROPERTY()
 	APadlockActor* CurrentPadlockTarget = nullptr;
@@ -191,11 +191,69 @@ protected:
 	void OnPadlockRotateDown();
 
 public:
-	/** Called by PadlockActor when unlock animation completes (or by Q cancel). */
 	void EndPadlockInteraction();
+
+	// ==========================================================
+	// ===== NEW: Blackboard Puzzle Interaction =================
+	// ==========================================================
+
+	/**
+	 * IMC active while the puzzle grid is being manipulated
+	 * (WASD navigate, E interact, R rotate, Q cancel).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	class UInputMappingContext* IMC_BlackboardPuzzle;
+
+	/** Navigate up in the puzzle grid. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* BBNavUpAction;
+
+	/** Navigate down in the puzzle grid. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* BBNavDownAction;
+
+	/** Navigate left in the puzzle grid. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* BBNavLeftAction;
+
+	/** Navigate right in the puzzle grid. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* BBNavRightAction;
+
+	/** Pick up / place piece on the puzzle grid. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* BBInteractAction;
+
+	/** Rotate held piece 90° CW. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* BBRotateAction;
+
+	/** Cancel (return piece / exit puzzle). Uses InventoryCancelAction or a dedicated one. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* BBCancelAction;
+
+	UPROPERTY()
+	ABlackboardPuzzleActor* CurrentBlackboardTarget = nullptr;
+
+	void BeginBlackboardInteraction(ABlackboardPuzzleActor* Board);
+	void EndBlackboardInteraction(bool bSolved = false);
+
+protected:
+	// Puzzle-mode input handlers
+	void OnBBNavUp();
+	void OnBBNavDown();
+	void OnBBNavLeft();
+	void OnBBNavRight();
+	void OnBBInteract();
+	void OnBBRotate();
+	void OnBBCancel();
+
+	/** Called from UseSelectedItem when the target is a blackboard. */
+	void UseItemOnBlackboard();
 
 	// ===== END NEW =====
 
+public:
 	USkeletalMeshComponent* GetMesh1P() const { return Mesh1P; }
 	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
 
