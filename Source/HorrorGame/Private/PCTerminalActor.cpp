@@ -106,6 +106,13 @@ void APCTerminalActor::Tick(float DeltaTime)
 	APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
 	if (!Player) return;
 
+    // If interaction camera is active, player is interacting — hide all widgets
+    if (InteractionCamera && InteractionCamera->IsActive())
+    {
+        if (ArrowWidget) ArrowWidget->SetVisibility(false);
+        if (FullInteractionWidget) FullInteractionWidget->SetVisibility(false);
+        return;
+    }
 	// Arrow visibility
 	const bool bArrowShouldShow = CanShowInteraction(Player);
 	if (ArrowWidget) ArrowWidget->SetVisibility(bArrowShouldShow);
@@ -135,22 +142,11 @@ bool APCTerminalActor::CanShowInteraction(APawn* Player) const
 
 bool APCTerminalActor::CanShowFullInteraction(APawn* Player) const
 {
-	if (!Player) return false;
-	if (!InteractionBox) return false;
+    if (!Player) return false;
+    if (!InteractionBox) return false;
 
-	const float Dist = FVector::Dist(Player->GetActorLocation(), InteractionBox->GetComponentLocation());
-	if (Dist > InteractionUseDistance) return false;
-
-	APlayerController* PC = Cast<APlayerController>(Player->GetController());
-	if (!PC) return true;
-
-	FVector2D ScreenPos;
-	const bool bProjected = PC->ProjectWorldLocationToScreen(InteractionBox->GetComponentLocation(), ScreenPos, true);
-	if (!bProjected) return false;
-
-	int32 SizeX = 0, SizeY = 0;
-	PC->GetViewportSize(SizeX, SizeY);
-	return ScreenPos.X >= 0 && ScreenPos.X <= SizeX && ScreenPos.Y >= 0 && ScreenPos.Y <= SizeY;
+    const float Dist = FVector::Dist(Player->GetActorLocation(), InteractionBox->GetComponentLocation());
+    return Dist <= InteractionUseDistance;
 }
 
 void APCTerminalActor::SetFullWidgetVisible(bool bVisible, APawn* Player)
@@ -179,6 +175,10 @@ void APCTerminalActor::SetFullWidgetVisible(bool bVisible, APawn* Player)
 	}
 	else // closing
 	{
+		// Don't tear down chat if we're actively interacting (camera is on)
+		if (InteractionCamera && InteractionCamera->IsActive())
+			return;
+			
 		// cancel pending start
 		GetWorld()->GetTimerManager().ClearTimer(DelayedChatStartTimer);
 		PendingPlayerController = nullptr;

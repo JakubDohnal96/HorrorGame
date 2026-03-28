@@ -720,6 +720,7 @@ void AHorrorGameCharacter::EndDoorUnlockSequence(bool bSuccess)
     }
 
     CurrentDoorUnlockTarget = nullptr;
+    bDoorUnlockAnimPlaying = false;
 }
 
 void AHorrorGameCharacter::UseSelectedItem()
@@ -735,6 +736,7 @@ void AHorrorGameCharacter::UseSelectedItem()
     }
 
     if (!CurrentDoorUnlockTarget) { UE_LOG(LogTemplateCharacter, Log, TEXT("UseSelectedItem: no door target")); return; }
+    if (bDoorUnlockAnimPlaying) return;
 
     const int32 Sel = InventoryComponent->GetSelectedIndex();
     if (!InventoryComponent->Items.IsValidIndex(Sel))
@@ -787,7 +789,7 @@ void AHorrorGameCharacter::UseSelectedItem()
 
     if (Item.ItemMesh) Key->SetKeyMesh(Item.ItemMesh);
     else UE_LOG(LogTemplateCharacter, Warning, TEXT("UseSelectedItem: item has no ItemMesh"));
-
+    bDoorUnlockAnimPlaying = true;
     Key->StartInsertAnimation(StartTransform, TargetTransform, 1.2f, CurrentDoorUnlockTarget, this);
 }
 
@@ -948,6 +950,25 @@ void AHorrorGameCharacter::ConfirmPickupItem()
 void AHorrorGameCharacter::PerformInteractionScan()
 {
     if (!InteractionSphere || !GetWorld()) return;
+    
+    // If the player is in any interaction, hide all widgets and skip scan
+    if (CurrentDoorUnlockTarget || CurrentPadlockTarget || CurrentBlackboardTarget
+        || CurrentPickupItemTarget || CurrentPCTerminalTarget)
+    {
+        TArray<AActor*> OverlappingActors;
+        InteractionSphere->GetOverlappingActors(OverlappingActors);
+        for (AActor* Actor : OverlappingActors)
+        {
+            if (AInteractableActor* IA = Cast<AInteractableActor>(Actor))
+                IA->SetFullWidgetVisible(false, this);
+            else if (ADoorActor* D = Cast<ADoorActor>(Actor))
+                D->SetFullWidgetVisible(false, this);
+            else if (APCTerminalActor* P = Cast<APCTerminalActor>(Actor))
+                P->SetFullWidgetVisible(false, this);
+        }
+        CurrentInteractable = nullptr;
+        return;
+    }
 
     TArray<AActor*> OverlappingActors;
     InteractionSphere->GetOverlappingActors(OverlappingActors);

@@ -220,6 +220,18 @@ void ADoorActor::Tick(float DeltaTime)
         }
     }
 
+    const bool bInDoorInteraction = 
+        (InteractionCamera_Front && InteractionCamera_Front->IsActive()) ||
+        (InteractionCamera_Back  && InteractionCamera_Back->IsActive());
+    if (bInDoorInteraction)
+    {
+        if (ArrowWidget_Front) ArrowWidget_Front->SetVisibility(false);
+        if (ArrowWidget_Back)  ArrowWidget_Back->SetVisibility(false);
+        if (InteractionWidget_Front) InteractionWidget_Front->SetVisibility(false);
+        if (InteractionWidget_Back)  InteractionWidget_Back->SetVisibility(false);
+        return;
+    }
+    
     /* ===== Arrow widget visibility (distance-based side selection) ===== */
     const bool bArrowShouldShow = CanShowInteraction(Player);
 

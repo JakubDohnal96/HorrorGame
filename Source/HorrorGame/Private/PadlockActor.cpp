@@ -299,6 +299,13 @@ void APadlockActor::Tick(float DeltaTime)
         return;
     }
 
+    if (bInInteractionMode)
+    {
+        if (ArrowWidget) ArrowWidget->SetVisibility(false);
+        if (FullInteractionWidget) FullInteractionWidget->SetVisibility(false);
+        return;
+    }
+
     APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
     if (!Player)
     {

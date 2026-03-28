@@ -124,6 +124,8 @@ protected:
 	UPROPERTY()
 	class ADoorActor* CurrentDoorUnlockTarget = nullptr;
 
+	bool bDoorUnlockAnimPlaying = false;
+
 	void UseSelectedItem();
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
