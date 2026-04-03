@@ -4,7 +4,9 @@
 #include "Components/WidgetComponent.h"
 #include "Components/BoxComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
 
 AInteractableActor::AInteractableActor()
 {
@@ -109,4 +111,32 @@ void AInteractableActor::UpdateArrowVisibility(APawn* Player)
 UCameraComponent* AInteractableActor::GetInteractionCamera(const APawn* Player) const
 {
     return InteractionCamera;
+}
+
+bool AInteractableActor::IsInteractionVisibleToPlayer(APawn* Player) const
+{
+    if (!Player || !InteractionBox) return false;
+
+    APlayerController* PC = Cast<APlayerController>(Player->GetController());
+    if (!PC || !PC->PlayerCameraManager) return false;
+
+    FVector CameraLocation = PC->PlayerCameraManager->GetCameraLocation();
+    FVector CameraForward = PC->PlayerCameraManager->GetCameraRotation().Vector();
+    FVector ToBox = (InteractionBox->GetComponentLocation() - CameraLocation).GetSafeNormal();
+
+    // Facing check: is the player roughly looking toward the interaction box?
+    // 0.3 ≈ ~72° half-angle — generous enough to not feel restrictive
+    if (FVector::DotProduct(CameraForward, ToBox) < 0.3f)
+        return false;
+
+    // Line trace: is there a wall between camera and interaction box?
+    FHitResult Hit;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(Player);
+    Params.AddIgnoredActor(this);
+
+    if (GetWorld()->LineTraceSingleByChannel(Hit, CameraLocation, InteractionBox->GetComponentLocation(), ECC_Visibility, Params))
+        return false;
+
+    return true;
 }

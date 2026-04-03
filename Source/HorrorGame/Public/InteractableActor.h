@@ -61,6 +61,8 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interactable|Components")
     UBoxComponent* InteractionBox;
 
+    /** Returns true if the interaction box is on screen AND there's no wall blocking line of sight from the camera. */
+    bool IsInteractionVisibleToPlayer(APawn* Player) const;
 
 private:
     // Register/unregister with InteractableManager
